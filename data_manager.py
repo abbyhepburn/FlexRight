@@ -16,7 +16,7 @@ class FlexDatabase:
         self.users = self.db['users']
         self.sessions = self.db['sessions']
     #Register new user
-    def register_new_user(self, username, password, full_name, user_email, role="patient"):
+    def register_new_user(self, username, password, full_name, user_email):
         #takes username input and checks if it already exists
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
@@ -29,7 +29,6 @@ class FlexDatabase:
             "password": hashed_password,
             "name": full_name,
             "email": user_email,
-            "role": role,
             "shared_with": []
         }
         #inserts dictionary into usersDB
@@ -79,3 +78,18 @@ class FlexDatabase:
             upsert=True
         )
         return f"Template for {name} saved at {observed_angle} degrees"
+    def get_user_sessions(self, user_id):
+        try:
+            # Sort by timestamp descending so newest is first
+            sessions = list(self.sessions.find({"user_id": user_id}).sort("timestamp", -1))
+            if not sessions:
+                return "No workout data found for this user."
+            
+            # Format the data into a readable string or list for the UI
+            report = ""
+            for s in sessions:
+                date = s['timestamp'].strftime("%Y-%m-%d %H:%M")
+                report += f"📅 **{date}** | 🏃 {s['exercise']} | ✅ Reps: {s['reps']} | 🎯 Score: {s['accuracy_score']}%\n\n---\n"
+            return report
+        except Exception as e:
+            return f"Error fetching sessions: {e}"
