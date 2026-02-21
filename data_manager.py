@@ -3,6 +3,7 @@ import datetime
 from pymongo import MongoClient
 from dotenv import load_dotenv
 import certifi
+import bcrypt
 load_dotenv()
 #creation of class to allow functions to be accesed easier
 class FlexDatabase:
@@ -13,15 +14,19 @@ class FlexDatabase:
         self.db = self.client['flexright_db']
         #connect to users database
         self.users = self.db['users']
+        self.sessions = self.db['sessions']
     #Register new user
-    def register_new_user(self, username, full_name, user_email, role="patient"):
+    def register_new_user(self, username, password, full_name, user_email, role="patient"):
         #takes username input and checks if it already exists
+        salt = bcrypt.gensalt()
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
         user_id = username.lower().strip()
         if self.users.find_one({"user_id": user_id}):
             return "Error: User already exists"
         #dictionary of all of users info
         new_user = {
             "user_id": user_id,
+            "password": hashed_password,
             "name": full_name,
             "email": user_email,
             "role": role,
@@ -30,6 +35,12 @@ class FlexDatabase:
         #inserts dictionary into usersDB
         self.users.insert_one(new_user)
         return f"Success: {full_name} registered!"
+    def login_user(self, username, password):
+        user_id = username.lower().strip()
+        user = self.users.find_one({"user_id": user_id})
+        if user and bcrypt.checkpw(password.encode('utf-8'), user['password']):
+            return True, user
+        return False, "Invalid username or password"
     #adds other users to shared list
     def add_shared_access(self, current_user_id, pro_id_to_add):
         #adds shareid to dict of allowed users
@@ -54,14 +65,6 @@ class FlexDatabase:
     def get_exercise_details(self, exercise_name):
         return self.db['exercises'].find_one({"name": exercise_name})
         #fine_one allows MongoDB to find the exact one document that matches name
-    def login_user(self, username):
-        user_id = username.lower().strip()
-        user_profile = self.users.find_one({"user_id": user_id})
-        
-        if user_profile:
-            return True, user_profile
-        else:
-            return False, "User not found. Please register first."
     def capture_exercise_template(self, name, difficulty, observed_angle):
         template = {
             "name": name,
