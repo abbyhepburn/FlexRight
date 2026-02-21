@@ -16,8 +16,15 @@ exercise_choice = None
 rep_goal = 10  # Default goal
 
 def select_exercise(choice):
-    global exercise_choice
+    global exercise_choice, rep_goal
     exercise_choice = choice
+    # read rep goal from entry immediately when user selects an exercise
+    try:
+        rep_goal = int(rep_var.get())
+        if rep_goal < 1:
+            rep_goal = 10
+    except:
+        rep_goal = 10
     root.destroy() # Closes the pop-up window
 
 root = tk.Tk()
@@ -54,22 +61,7 @@ rep_var = tk.StringVar(value="10")
 rep_entry = tk.Entry(root, textvariable=rep_var, font=LAUNCH_FONT_LABEL, width=8, justify='center')
 rep_entry.pack(pady=4)
 
-def set_rep_goal():
-    global rep_goal, exercise_choice
-    try:
-        rep_goal = int(rep_var.get())
-        if rep_goal < 1:
-            rep_goal = 10
-    except:
-        rep_goal = 10
-    # If user hasn't selected an exercise, default to curl
-    if not exercise_choice:
-        exercise_choice = "curl"
-    root.destroy()
-
-btn_start = tk.Button(root, text="Start Workout", width=20, font=LAUNCH_BTN_FONT,
-                      bg="#8D7BE9", fg="#FFFFFF", activebackground="#6F55D9", bd=0, command=set_rep_goal)
-btn_start.pack(pady=14)
+# Start button removed: exercise selection now starts workout immediately
 
 root.mainloop()
 
