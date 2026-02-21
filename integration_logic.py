@@ -46,10 +46,7 @@ def log_workout_session(user_id, exercise_type, performance_metrics):
 
 # Part 3: Granular Access Control 
 def get_authorized_client_data(trainer_id, client_id):
-    """
-    The 'Gatekeeper' function. It ensures a Professional can only see data if 
-    the User has explicitly added them to their 'shared_with' list.
-    """
+
     # User WALL: Make sure the Professiojal can only see data is user adds them to "shared_with" list
     if db is None: return None
 
