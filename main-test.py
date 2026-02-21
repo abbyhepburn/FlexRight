@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
 import gradio as gr
 import os
+import subprocess
 from data_manager import FlexDatabase
 from dotenv import load_dotenv
 
@@ -9,9 +11,13 @@ db_helper = FlexDatabase(os.getenv("MONGO_URI"))
 # --- DATABASE BRIDGE FUNCTIONS ---
 
 def get_available_professionals():
-    trainers = db_helper.users.find({"role": "trainer"})
-    # Returns a list of names for the CheckboxGroup
-    return [t.get("name", t["user_id"]) for t in trainers]
+    try:
+        trainers = db_helper.users.find({"role": "trainer"})
+        # Returns a list of names for the CheckboxGroup
+        return [t.get("name", t["user_id"]) for t in trainers]
+    except Exception as e:
+        print(f"Warning: Could not connect to database: {e}")
+        return []  # Return empty list if database unavailable
 
 def get_authorized_patients(trainer_username):
     if not trainer_username:
@@ -23,16 +29,28 @@ def get_authorized_patients(trainer_username):
     # Return list of tuples (Display Name, ID) for the dropdown
     return gr.Dropdown(choices=[(p["name"], p["user_id"]) for p in patients])
 
+def launch_workout():
+    """Launch the yolo_test.py fitness app"""
+    try:
+        # Launch yolo_test.py in a separate process
+        subprocess.Popen([
+            os.path.join(os.path.dirname(__file__), "venv", "Scripts", "python.exe"),
+            os.path.join(os.path.dirname(__file__), "yolo_test.py")
+        ])
+        return "[OK] Workout app launched! Check your workout window."
+    except Exception as e:
+        return f"[ERROR] Error launching workout: {str(e)}"
+
 # --- AUTH & NAVIGATION LOGIC ---
 
 def handle_login(username, password):
     if not username or not password:
-        return gr.update(visible=False), gr.update(visible=True), "⚠️ Enter both fields", "", ""
+        return gr.update(visible=False), gr.update(visible=True), "[WARNING] Enter both fields", "", ""
         
     success, profile = db_helper.login_user(username, password)
     
     if success:
-        welcome_msg = f"## ✅ Login Successful! Welcome, {profile['name']}"
+        welcome_msg = f"## [OK] Login Successful! Welcome, {profile['name']}"
         return (
             gr.update(visible=True),   # Show protected_view
             gr.update(visible=False),  # Hide login_gate
@@ -42,7 +60,7 @@ def handle_login(username, password):
         )
     else:
         # Show error message on the login screen
-        return gr.update(visible=False), gr.update(visible=True), f"❌ {profile}", "", ""
+        return gr.update(visible=False), gr.update(visible=True), f"[ERROR] {profile}", "", ""
 
 def handle_logout():
     # Reverse the visibility
@@ -57,7 +75,7 @@ def handle_sign_up(uname, pword, fname, email, role):
     }
     for label, value in fields.items():
         if not value or str(value).strip() == "":
-            return f"⚠️ Error: {label} field is required!"
+            return f"[WARNING] Error: {label} field is required!"
             
     return db_helper.register_new_user(uname, pword, fname, email, role)
 
@@ -68,7 +86,7 @@ with gr.Blocks(title="FlexRight: Secure AI Recovery") as demo:
     current_user_id = gr.State("")
     current_user_role = gr.State("")
 
-    gr.Markdown("# 🛡️ FlexRight")
+    gr.Markdown("# [SHIELD] FlexRight")
 # --- 1. THE LOGIN/SIGNUP GATE ---
     with gr.Column(visible=True) as login_gate:
         with gr.Tabs():
@@ -97,12 +115,14 @@ with gr.Blocks(title="FlexRight: Secure AI Recovery") as demo:
             with gr.Tab("The Gym"):
                 gr.Markdown("## User Workspace")
                 with gr.Row():
-                    webcam = gr.Image(sources=["webcam"], streaming=True, label="Live Feed")
+                    launch_btn = gr.Button("[PLAY] Click to Start Workout", variant="primary", size="lg", scale=1)
                     stats = gr.Label(label="Live Performance Metrics")
+                
+                workout_status = gr.Markdown("Click the button to launch your workout program")
 
             # TAB: DATA PRIVACY (Member 2)
             with gr.Tab("Data Privacy"):
-                gr.Markdown("## 🔐 Your Data, Your Choice")
+                gr.Markdown("## [LOCK] Your Data, Your Choice")
                 with gr.Row():
                     share_input = gr.Textbox(label="Enter Trainer ID", placeholder="Search by ID...")
                     add_btn = gr.Button("Grant Access", variant="primary")
@@ -116,12 +136,18 @@ with gr.Blocks(title="FlexRight: Secure AI Recovery") as demo:
 
             # TAB: TRAINER PORTAL (Member 4)
             with gr.Tab("Trainer Portal"):
-                gr.Markdown("## 🏥 Professional Portal")
+                gr.Markdown("## [HOSPITAL] Professional Portal")
                 client_id = gr.Dropdown(label="Select Authorized Client", choices=[])
                 refresh_btn = gr.Button("Find My Clients")
                 plot = gr.Plot(label="Recovery Telemetry (Skeletal Angles)")
 
     # --- EVENT LOGIC ---
+
+    # Launch Workout Button
+    launch_btn.click(
+        fn=launch_workout,
+        outputs=workout_status
+    )
 
     # Sign Up: Output goes to 'reg_status'
     reg_btn.click(handle_sign_up, [reg_user, reg_pass, reg_name, reg_email, reg_role], reg_status)
