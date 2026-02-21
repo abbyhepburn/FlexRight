@@ -38,7 +38,7 @@ class FlexDatabase:
             {"$addToSet": {"shared_with": pro_id_to_add}}
         )
         return f"Access granted to {pro_id_to_add}!"
-#save workout info
+    #saves workout info
     def save_workout(self, user_id, exercise_name, reps, score):
         ##saves all inputs to dict and pushes it to sessions db
         session_data = {
