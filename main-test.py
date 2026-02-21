@@ -7,21 +7,65 @@ load_dotenv()
 db_helper = FlexDatabase(os.getenv("MONGO_URI"))
 
 # --- DATABASE BRIDGE FUNCTIONS ---
-
-def get_available_professionals():
-    trainers = db_helper.users.find({"role": "trainer"})
-    # Returns a list of names for the CheckboxGroup
-    return [t.get("name", t["user_id"]) for t in trainers]
-
-def get_authorized_patients(trainer_username):
-    if not trainer_username:
+def get_available_users():
+    """
+    Replaces get_available_professionals.
+    Returns a list of ALL usernames so anyone can be found.
+    """
+    try:
+        # We query all users, but only return their IDs
+        all_users = db_helper.users.find({}, {"user_id": 1})
+        return [u["user_id"] for u in all_users]
+    except Exception as e:
+        print(f"Error fetching users: {e}")
         return []
-    # Search for users where trainer_username is in their 'shared_with' list
-    query = {"shared_with": trainer_username}
-    patients = db_helper.users.find(query)
+def search_user_metrics(my_id, target_id):
+    """
+    Checks if 'target_id' exists and if they have shared data with 'my_id'.
+    """
+    if not target_id:
+        return "⚠️ Please enter a User ID to search."
     
-    # Return list of tuples (Display Name, ID) for the dropdown
-    return gr.Dropdown(choices=[(p["name"], p["user_id"]) for p in patients])
+    target_id = target_id.lower().strip()
+    
+    # 1. Check if the user exists and if they shared with the logged-in user
+    # Logic: Search for a user where user_id is the target AND my_id is in their shared_with list
+    permission_check = db_helper.users.find_one({
+        "user_id": target_id,
+        "shared_with": my_id
+    })
+
+    if not permission_check:
+        return f"❌ Access Denied: '{target_id}' has not shared their data with you, or the user does not exist."
+
+    # 2. If valid, fetch their sessions
+    sessions = list(db_helper.sessions.find({"user_id": target_id}).sort("timestamp", -1))
+    
+    if not sessions:
+        return f"✅ Access Verified for {permission_check.get('name', target_id)}, but no workout data was found."
+    
+    # 3. Format the stats
+    output = f"## 📈 Progress for {permission_check.get('name', target_id)}\n\n"
+    for s in sessions:
+        date_str = s['timestamp'].strftime("%Y-%m-%d %I:%M %p")
+        output += f"**{date_str}** | 🏃 {s['exercise']} | {s['reps']} Reps | {s['accuracy_score']}% Score\n\n---\n"
+    
+    return output
+
+def display_shared_metrics(target_user_id):
+    if not target_user_id: 
+        return "Select a user to view metrics."
+    # Queries the sessions collection for that specific user
+    sessions = list(db_helper.sessions.find({"user_id": target_user_id}).sort("timestamp", -1))
+    
+    if not sessions:
+        return "No session data found for this user."
+    
+    output = "### 📊 Activity History\n\n"
+    for s in sessions:
+        date_str = s['timestamp'].strftime("%Y-%m-%d")
+        output += f"**{date_str}** | {s['exercise']} | {s['reps']} Reps | {s['accuracy_score']}% Accuracy\n\n"
+    return output
 
 # --- AUTH & NAVIGATION LOGIC ---
 
@@ -101,6 +145,7 @@ with gr.Blocks(title="FlexRight: Secure AI Recovery") as demo:
                     stats = gr.Label(label="Live Performance Metrics")
 
             # TAB: DATA PRIVACY (Member 2)
+            
             with gr.Tab("Data Privacy"):
                 gr.Markdown("## 🔐 Your Data, Your Choice")
                 with gr.Row():
@@ -110,17 +155,34 @@ with gr.Blocks(title="FlexRight: Secure AI Recovery") as demo:
                 # Note: get_available_professionals() runs once at startup
                 access_list = gr.CheckboxGroup(
                     label="Current Authorized Professionals", 
-                    choices=get_available_professionals() 
+                    choices=get_available_users() 
                 )
                 status_msg = gr.Markdown()
 
-            # TAB: TRAINER PORTAL (Member 4)
-            with gr.Tab("Trainer Portal"):
-                gr.Markdown("## 🏥 Professional Portal")
-                client_id = gr.Dropdown(label="Select Authorized Client", choices=[])
-                refresh_btn = gr.Button("Find My Clients")
-                plot = gr.Plot(label="Recovery Telemetry (Skeletal Angles)")
+            with gr.Tab("Shared Stats"):
+                gr.Markdown("## 🔍 Search Shared Progress")
+                gr.Markdown("Enter a Username to view their metrics (Note: They must have granted you access first).")
+                
+                with gr.Row():
+                    search_input = gr.Textbox(
+                        label="Enter Username", 
+                        placeholder="e.g. user123",
+                        max_lines=1
+                    )
+                    search_btn = gr.Button("Search Metrics", variant="primary")
+                
+                # The area where the reps and dates will appear
+                metrics_display = gr.Markdown("Enter a username above to begin.")
+    # --- UPDATED EVENT LOGIC ---
 
+    # 1. Fill the dropdown with people who shared with the logged-in user
+    search_btn.click(
+        fn=search_user_metrics,
+        inputs=[current_user_id, search_input],
+        outputs=metrics_display
+    )
+
+   
     # --- EVENT LOGIC ---
 
     # Sign Up: Output goes to 'reg_status'
@@ -144,13 +206,6 @@ with gr.Blocks(title="FlexRight: Secure AI Recovery") as demo:
         fn=lambda u, t: db_helper.add_shared_access(u, t), 
         inputs=[current_user_id, share_input], 
         outputs=status_msg
-    )
-
-    # Trainer Refresh Logic
-    refresh_btn.click(
-        fn=get_authorized_patients, 
-        inputs=[current_user_id], 
-        outputs=client_id
     )
 
 if __name__ == "__main__":
