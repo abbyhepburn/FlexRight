@@ -7,6 +7,8 @@ import sys
 import json
 import os
 
+# Get User ID from command line arguments
+USER_ID = sys.argv[1] if len(sys.argv) > 1 else "guest_user"
 # UI font presets
 FONT_HEADER = cv2.FONT_HERSHEY_TRIPLEX
 FONT_LARGE  = cv2.FONT_HERSHEY_DUPLEX
@@ -298,6 +300,8 @@ while cap.isOpened():
 
                 # Rep state machine
                 if angle is not None and not finished:
+                    rep_angles.append(angle) 
+                    
                     if stage == "START":
                         if angle < end_thresh:
                             frame_count += 1
@@ -305,6 +309,7 @@ while cap.isOpened():
                                 stage = "DOWN"; frame_count = 0
                         else:
                             frame_count = 0
+                            
                     elif stage == "DOWN":
                         if angle > start_thresh:
                             frame_count += 1
@@ -425,7 +430,7 @@ while cap.isOpened():
 cap.release()
 cv2.destroyAllWindows()
 
-# --- STEP 7: Savee session summary to a temp JSON file for the website ---
+# --- STEP 7: Save session summary to a temp JSON file for the website ---
 over_count  = sum(1 for w in warnings_log if w["type"] == "overextension")
 under_count = sum(1 for w in warnings_log if w["type"] == "underextension")
 

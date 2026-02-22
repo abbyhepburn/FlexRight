@@ -52,13 +52,30 @@ def search_user_metrics(my_id, target_id):
         output += f"**{date_str}** | 🏃 {s['exercise']} | {s['reps']} Reps | {s['accuracy_score']}% Score\n\n---\n"
     return output
 
+def get_live_metrics(uid):
+    if not uid:
+        return {}, "### ⚠️ Please log in to view your metrics."
+    sessions = list(db_helper.sessions.find({"user_id": uid}).sort("timestamp", -1).limit(10))
+    if not sessions:
+        return {"No Data": 0}, "### 🏋️ No workout data found yet. Start a session in 'The Gym'!"
+    latest = sessions[0]
+    label_data = {"Overall Form Accuracy": latest.get('accuracy_score', 0) / 100}
+    history_md  = f"## 🔥 Latest Session: {latest['reps']} Reps of {latest['exercise']}\n"
+    history_md += f"### Average Form: {latest.get('accuracy_score', 0)}%\n"
+    history_md += "---\n### 📜 Activity Log\n"
+    history_md += "| Date | Exercise | Reps | Accuracy |\n|:--- |:--- |:--- |:--- |\n"
+    for s in sessions:
+        date_str = s['timestamp'].strftime("%b %d, %I:%M %p")
+        history_md += f"| {date_str} | {s['exercise']} | {s['reps']} | {s.get('accuracy_score', 0)}% |\n"
+    return label_data, history_md
 def refresh_sharing_view(uid):
     all_users     = get_available_users()
     already_shared = db_helper.check_shared(uid)
     return gr.update(choices=all_users, value=already_shared)
 
 def launch_workout(uid):
-    """Launch yolo_test.py, passing the logged-in user_id as an argument."""
+    if not uid:
+        return "⚠️ Please login first."
     try:
         python_exe = os.path.join(os.path.dirname(__file__), "venv", "Scripts", "python.exe")
         if not os.path.exists(python_exe):
@@ -134,7 +151,7 @@ def handle_login(username, password):
         return gr.update(visible=False), gr.update(visible=True), "⚠️ Enter both fields", ""
     success, profile = db_helper.login_user(username, password)
     if success:
-        welcome_msg = f"## ✅ Welcome, {profile['name']}!"
+        welcome_msg = f"##Welcome!"
         return gr.update(visible=True), gr.update(visible=False), welcome_msg, username
     return gr.update(visible=False), gr.update(visible=True), f"❌ {profile}", ""
 
@@ -151,6 +168,10 @@ def handle_final_signup(uname, pword, fname, email):
     if "Success" in result:
         return gr.Tabs(selected="login_tab"), gr.update(visible=True), gr.update(visible=False), f"✅ {result} Please Login."
     return gr.Tabs(selected="signup_tab"), gr.update(visible=False), gr.update(visible=True), f"❌ {result}"
+
+def refresh_ui_data(uid):
+    label_output, markdown_output = get_live_metrics(uid)
+    return label_output, markdown_output
 
 # --- Interface ---
 with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
@@ -178,12 +199,13 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
                     finish_btn = gr.Button("Complete Account Setup ✅", variant="primary")
                 reg_status = gr.Markdown()
 
-    # Protected content
+    # --- Protected App Content ---
     with gr.Column(visible=False, variant="panel") as protected_view:
         with gr.Row():
             user_welcome = gr.Markdown("## Welcome back!")
             logout_btn   = gr.Button("Logout", variant="stop", size="sm")
 
+        # Tabs should be directly under protected_view
         with gr.Tabs():
             # ── The Gym ──────────────────────────────────────────────────────
             with gr.Tab("The Gym"):
@@ -197,8 +219,6 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
                     "Complete a workout then click **Refresh Summary**."
                 )
                 refresh_btn = gr.Button("🔄 Refresh Summary", variant="secondary")
-
-            # ── Privacy & Sharing ─────────────────────────────────────────────
             with gr.Tab("Privacy & Sharing"):
                 gr.Markdown("## 🔐 Manage Access")
                 with gr.Row():
@@ -277,6 +297,7 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
         inputs=[current_user_id],
         outputs=session_summary_display
     )
+
 
 if __name__ == "__main__":
     demo.launch(inbrowser=True)

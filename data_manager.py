@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import certifi
 import bcrypt
 load_dotenv()
-#creation of class to allow functions to be accesed easier
+from datetime import datetime
 class FlexDatabase:
     def __init__(self, connection_string):
         #connect to MongoDB
@@ -136,15 +136,15 @@ class FlexDatabase:
         total = len(warnings)
         accuracy = max(0, round(100 - (total / max(reps, 1)) * 20))
         session_data = {
-            "user_id":      user_id,
-            "exercise":     exercise,
-            "reps":         reps,
-            "rep_goal":     rep_goal,
+            "user_id":        user_id,
+            "exercise":       exercise,
+            "reps":           reps,
+            "rep_goal":       rep_goal,
             "accuracy_score": accuracy,
-            "warnings":     warnings,
-            "over_count":   over_count,
-            "under_count":  under_count,
-            "timestamp":    datetime.datetime.now()
+            "warnings":       warnings,
+            "over_count":     over_count,
+            "under_count":    under_count,
+            "timestamp":      datetime.now()
         }
         self.sessions.insert_one(session_data)
         return "Session saved!"

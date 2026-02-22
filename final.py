@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import gradio as gr
 import pymongo
 import certifi
@@ -170,10 +171,22 @@ with gr.Blocks(title="FlexRight", theme=flex_theme, css=custom_css) as demo:
                 client_id = gr.Dropdown(label="Authorized Client", choices=["Alex", "Jordan", "New User"])
                 gr.Markdown("*(Database Reports loading...)*")
 
-    # --- THE WIRING ----
-    register_btn.click(fn=handle_initial_register, inputs=[new_user_id, full_name], outputs=[register_step, password_step, signup_status])
-    submit_btn.click(fn=handle_final_submit, inputs=[new_user_id, full_name, new_pwd], outputs=[main_tabs, signup_status])
-    login_btn.click(fn=handle_login, inputs=[user_input, pass_input], outputs=[protected_view, login_msg])
+    # --- THE WIRING ---
+    register_btn.click(
+        fn=handle_initial_register,
+        inputs=[new_user_id, full_name],
+        outputs=[register_step, password_step, signup_status]
+    )
+    submit_btn.click(
+        fn=handle_final_submit,
+        inputs=[new_user_id, full_name, new_pwd],
+        outputs=[main_tabs, signup_status]
+    )
+    login_btn.click(
+        fn=handle_login,
+        inputs=[user_input, pass_input],
+        outputs=[protected_view, login_msg]
+    )
 
 if __name__ == "__main__":
     demo.launch(share=True)
