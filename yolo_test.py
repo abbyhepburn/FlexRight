@@ -10,11 +10,10 @@ FONT_HEADER = cv2.FONT_HERSHEY_TRIPLEX
 FONT_LARGE = cv2.FONT_HERSHEY_DUPLEX
 FONT_MED = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SMALL = cv2.FONT_HERSHEY_COMPLEX_SMALL
-
+#file
 # --- STEP 1: The Pop-up Menu (Member 1 UX) ---
 exercise_choice = None
-rep_goal = 10  # Default goal
-
+rep_goal = 10  # default rep goal if user input is invalid
 def select_exercise(choice):
     global exercise_choice, rep_goal
     exercise_choice = choice
@@ -79,14 +78,12 @@ def calculate_angle(a, b, c):
 
 
 def is_keypoint_valid(points, indices, confidence_threshold=0.5):
-    """Check if all required keypoints indexes exist"""
     if points is None or len(points) == 0:
         return False
     return all(i < len(points) for i in indices)
 
 
 def draw_skeleton(frame, points):
-    """Draw the pose skeleton with lines and circles"""
     connections = [
         (0, 1), (0, 2), (1, 3), (2, 4),
         (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
