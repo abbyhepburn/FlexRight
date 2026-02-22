@@ -1,5 +1,3 @@
-This README.md is designed to be professional, clean, and easy for judges or other developers to navigate. It uses the "essay" story we crafted and the "built with" list.
-
 🛡️ FlexRight: AI-Powered Recovery
 FlexRight is an AI-driven physical therapy assistant designed to bridge the gap between clinical visits and home recovery. By turning a standard webcam into a high-precision digital coach, we ensure patients perform exercises with the correct form, making recovery safer and more data-driven.
 
