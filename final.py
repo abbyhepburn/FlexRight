@@ -1,8 +1,7 @@
+# -*- coding: utf-8 -*-
 import gradio as gr
 import pymongo
 import certifi
-from datetime import datetime
-import pandas as pd
 
 # --- 1. MONGODB CONNECTION ---
 # Using the credentials provided by Member 2 (Abby)
@@ -11,13 +10,13 @@ MONGO_URI = "mongodb+srv://abbyhepburn526:AbbyMay26!@flexcluster.sdbddiz.mongodb
 try:
     # certifi.where() is crucial for connecting from different laptops safely
     client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-    db = client["FlexCluster"]  # Database Name
-
+    db = client["FlexCluster"] # Database Name
+    
     # Using Member 2's specific Collection names
     users_col = db["users"]
     exercises_col = db["exercises"]
     sessions_col = db["sessions"]
-
+    
     print("✅ Connection Successful: FlexCluster is Live!")
 except Exception as e:
     print(f"❌ Connection Error: {e}")
@@ -25,7 +24,7 @@ except Exception as e:
 # --- 2. THE CUSTOM UI STYLING ---
 custom_css = """
 .gradio-container {background-color: #FFFFFF !important}
-footer {display: none !important}
+footer {display: none !important} 
 .lavender-text { color: #B299FF !important; font-weight: bold; }
 """
 
@@ -48,7 +47,7 @@ def handle_final_submit(uname, fname, pwd):
     """The 'Register' logic: Saves to MongoDB and jumps to Login Tab"""
     if not pwd or len(pwd) < 6:
         return gr.Tabs(selected="signup_tab"), "❌ Password too short (min 6 characters)."
-
+    
     # Check if user already exists in Abby's DB
     if users_col.find_one({"username": uname}):
         return gr.Tabs(selected="signup_tab"), "❌ Username already taken! Try another."
@@ -61,69 +60,32 @@ def handle_final_submit(uname, fname, pwd):
         "role": "patient",
         "created_at": "2026-02-21"
     }
-
+    
     # PERMANENT STORAGE IN MONGODB
     users_col.insert_one(new_user)
-
+    
     # Return: Switch to login tab, show success message
     return gr.Tabs(selected="login_tab"), f"✅ Welcome to the team, {uname}! Now login to start."
 
 def handle_login(username, password):
     """Verification Logic: Queries MongoDB for the user"""
     user = users_col.find_one({"username": username, "password": password})
-
+    
     if user:
         # Check if they have any saved exercise sessions
         sessions = sessions_col.count_documents({"username": username})
         return gr.Column(visible=True), f"✅ Logged in: **{user['full_name']}** | {sessions} Sessions Found"
-
+    
     return gr.Column(visible=False), "❌ Invalid Credentials. Please register first."
-
-def save_session(username, workout, reps):
-    if not username:
-        return "❌ Not logged in."
-    doc = {
-        "username": username,
-        "workout": workout,
-        "reps": int(reps),
-        "time": datetime.now().strftime("%Y-%m-%d %I:%M %p")
-    }
-    sessions_col.insert_one(doc)
-    return f"✅ Saved: {workout} • {reps} reps • {doc['time']}"
-
-# ✅ ADD THIS: Load sessions into table + quick stats
-def load_sessions(username, limit=10):
-    if not username:
-        empty = pd.DataFrame(columns=["time", "workout", "reps"])
-        return empty, "**Total Sessions:** —", "**Last Session:** —"
-
-    cursor = sessions_col.find(
-        {"username": username},
-        {"_id": 0, "time": 1, "workout": 1, "reps": 1}
-    ).sort("time", -1).limit(limit)
-
-    rows = list(cursor)
-    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["time", "workout", "reps"])
-
-    total = sessions_col.count_documents({"username": username})
-    last_text = "**Last Session:** —"
-    if rows:
-        last = rows[0]
-        last_text = f"**Last Session:** {last['workout']} • {last['reps']} reps • {last['time']}"
-
-    return df[["time", "workout", "reps"]], f"**Total Sessions:** {total}", last_text
 
 # --- 4. THE INTERFACE ---
 with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
-
-    # ✅ ADD THIS: state to track logged-in username
-    current_user_id = gr.State("")
-
+    
     gr.Markdown("# 🛡️ <span class='lavender-text'>FlexRight</span>")
     gr.Markdown("### AI-Powered Recovery & Skeletal Tracking")
-
+    
     with gr.Tabs() as main_tabs:
-
+        
         # --- SIGN UP TAB ---
         with gr.Tab("Sign Up", id="signup_tab"):
             # Step 1: Info
@@ -132,7 +94,7 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
                 new_user_id = gr.Textbox(label="Username", placeholder="Choose a unique ID")
                 full_name = gr.Textbox(label="Full Name", placeholder="Your legal name")
                 register_btn = gr.Button("Register", variant="primary")
-
+            
             # Step 2: Password (Hides step 1 when clicked)
             with gr.Column(visible=False) as password_step:
                 gr.Markdown("### 🔐 Step 2: Set Your Security")
@@ -156,22 +118,7 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
             with gr.Row():
                 webcam = gr.Image(sources=["webcam"], streaming=True, label="Live AI Skeletal Feed")
                 stats = gr.Label(label="Live Performance Metrics")
-
-            # ✅ ADD THIS: Metrics section
-            gr.Markdown("### 📊 Session History")
-
-            with gr.Row():
-                total_sessions_md = gr.Markdown("**Total Sessions:** —")
-                last_session_md = gr.Markdown("**Last Session:** —")
-
-            sessions_table = gr.Dataframe(
-                headers=["time", "workout", "reps"],
-                datatype=["str", "str", "number"],
-                interactive=False,
-                row_count=10,
-                col_count=3
-            )
-
+        
         with gr.Tab("Professional Portal"):
             gr.Markdown("## 🏥 Clinical Telemetry")
             client_id = gr.Dropdown(label="Authorized Client", choices=["Alex", "Jordan", "New User"])
@@ -181,8 +128,8 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
 
     # 1. Register -> Reveal Password
     register_btn.click(
-        fn=handle_initial_register,
-        inputs=[new_user_id, full_name],
+        fn=handle_initial_register, 
+        inputs=[new_user_id, full_name], 
         outputs=[register_step, password_step, signup_status]
     )
 
@@ -193,19 +140,52 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
         outputs=[main_tabs, signup_status]
     )
 
-    # ✅ ADD THIS: set current_user_id on login click
-    login_btn.click(
-        fn=lambda u: u,
-        inputs=[user_input],
-        outputs=[current_user_id]
-    )
+    # --- 5. THE WIRING ---
 
-    # 3. Login -> Verify with MongoDB & Reveal Gym
+    # 1. Login & Auto-Refresh
     login_btn.click(
-        fn=handle_login,
-        inputs=[user_input, pass_input],
+        fn=handle_login, 
+        inputs=[user_input, pass_input], 
         outputs=[protected_view, login_msg]
     )
+
+    # 2. Manual Refresh Logic
+    refresh_btn.click(
+    fn=refresh_ui_data,
+    inputs=[current_user_id],
+    outputs=[stats_label, history_display]
+    )
+
+    # 3. Workout Launch
+    launch_btn.click(
+        fn=launch_workout, 
+        inputs=[current_user_id], 
+        outputs=workout_status
+    )
+
+    # 4. Sharing & Search Logic
+    search_btn.click(search_user_metrics, [current_user_id, search_input], metrics_display)
+    
+    add_btn.click(
+        fn=db_helper.add_shared_access, 
+        inputs=[current_user_id, share_input], 
+        outputs=status_msg
+    ).then(
+        fn=refresh_sharing_view, 
+        inputs=[current_user_id],
+        outputs=[access_tags]
+    )
+
+    access_tags.change(
+        fn=db_helper.sync_sharing, 
+        inputs=[current_user_id, access_tags],
+        outputs=status_msg
+    )
+
+    # 5. Logout & Signup
+    logout_btn.click(fn=handle_logout, outputs=[protected_view, login_gate, login_status])
+    next_btn.click(handle_initial_register, [reg_user, reg_name, reg_email], [reg_step1, reg_step2, reg_status])
+    finish_btn.click(handle_final_signup, [reg_user, reg_pass, reg_name, reg_email], [auth_tabs, reg_step1, reg_step2, reg_status])
 
     # ✅ ADD THIS: load metrics right after login
     login_btn.click(
@@ -215,4 +195,22 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
     )
 
 if __name__ == "__main__":
+    demo.launch()
     demo.launch(share=True, inbrowser=True)
+
+
+# with gr.Tabs():
+#             # TAB: THE GYM (Member 1)
+#             with gr.Tab("The Gym"):
+#                 gr.Markdown("## User Workspace")
+#                 with gr.Row():
+#                     launch_btn = gr.Button("[PLAY] Click to Start Workout", variant="primary", size="lg", scale=1)
+#                     stats = gr.Label(label="Live Performance Metrics")
+                
+#                 workout_status = gr.Markdown("Click the button to launch your workout program")
+
+#  # Launch Workout Button
+#     launch_btn.click(
+#         fn=launch_workout,
+#         outputs=workout_status
+#     )
