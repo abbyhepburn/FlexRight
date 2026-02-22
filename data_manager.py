@@ -11,7 +11,7 @@ class FlexDatabase:
         #connect to MongoDB
         self.client = MongoClient(connection_string, tlsCAFile=certifi.where())
         #connect to main database
-        self.db = self.client['flexright_db']
+        self.db = self.client['FlexRightDB']
         #connect to users database
         self.users = self.db['users']
         self.sessions = self.db['sessions']
@@ -93,3 +93,38 @@ class FlexDatabase:
             return report
         except Exception as e:
             return f"Error fetching sessions: {e}"
+    def check_shared(self, my_id):
+        """
+        Returns a list of User IDs that the logged-in user (my_id) 
+        has already granted access to.
+        """
+        # 1. Fetch the logged-in user's document
+        user_doc = self.users.find_one({"user_id": my_id}, {"shared_with": 1})
+        
+        if not user_doc or "shared_with" not in user_doc:
+            return []
+
+        # 2. Get the list of IDs you've shared with
+        shared_ids = user_doc["shared_with"]
+
+        # 3. Optional: Verify these users still exist and return their IDs
+        # This finds all users whose user_id is IN your shared_ids list
+        valid_shares = self.users.find({"user_id": {"$in": shared_ids}}, {"user_id": 1})
+        
+        return [u["user_id"] for u in valid_shares]
+    # Add this to your FlexDatabase class in data_manager.py
+    def remove_shared_access(self, my_id, pro_id_to_remove):
+        """Removes a specific user from the shared_with list."""
+        self.users.update_one(
+            {"user_id": my_id},
+            {"$pull": {"shared_with": pro_id_to_remove}}
+        )
+        return f"Access revoked for {pro_id_to_remove}."
+    # In FlexDatabase class
+    def sync_sharing(self, my_id, selected_list):
+        """Overwrites the shared_with list to match the UI checkboxes."""
+        self.users.update_one(
+            {"user_id": my_id},
+            {"$set": {"shared_with": selected_list}}
+        )
+        return f"Permissions updated: {len(selected_list)} users authorized."

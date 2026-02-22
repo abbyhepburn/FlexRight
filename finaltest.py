@@ -1,26 +1,15 @@
+# -*- coding: utf-8 -*-
 import gradio as gr
-import pymongo
-import certifi
+import os
+import subprocess
+from data_manager import FlexDatabase
+from dotenv import load_dotenv
 
-# --- 1. MONGODB CONNECTION ---
-# Using the credentials provided by Member 2 (Abby)
-MONGO_URI = "mongodb+srv://abbyhepburn526:AbbyMay26!@flexcluster.sdbddiz.mongodb.net/?appName=FlexCluster"
+# Load database helper
+load_dotenv()
+db_helper = FlexDatabase(os.getenv("MONGO_URI"))
 
-try:
-    # certifi.where() is crucial for connecting from different laptops safely
-    client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-    db = client["FlexCluster"] # Database Name
-    
-    # Using Member 2's specific Collection names
-    users_col = db["users"]
-    exercises_col = db["exercises"]
-    sessions_col = db["sessions"]
-    
-    print("✅ Connection Successful: FlexCluster is Live!")
-except Exception as e:
-    print(f"❌ Connection Error: {e}")
-
-# --- 2. THE CUSTOM UI STYLING ---
+# --- 1. THE CUSTOM UI STYLING ---
 custom_css = """
 .gradio-container {background-color: #FFFFFF !important}
 footer {display: none !important} 
@@ -34,118 +23,232 @@ flex_theme = gr.themes.Soft(primary_hue="purple", neutral_hue="slate").set(
     button_primary_text_color="white",
 )
 
-# --- 3. BACKEND LOGIC ---
+def get_available_users():
+    try:
+        # We query all users, but only return their IDs
+        all_users = db_helper.users.find({}, {"user_id": 1})
+        return [u["user_id"] for u in all_users]
+    except Exception as e:
+        print(f"Error fetching users: {e}")
+        return []
+def check_shared(my_id, target_id):
+    target_id = target_id.lower().strip()
 
-def handle_initial_register(uname, fname):
-    """Transitions from Name entry to Password entry"""
-    if not uname or not fname:
-        return gr.Column(visible=True), gr.Column(visible=False), "⚠️ Please enter a Username and Full Name."
-    return gr.Column(visible=False), gr.Column(visible=True), f"Almost there, {fname}! Create a secure password."
+    # 1. Check if the user exists and if they shared with the logged-in user
+    # Logic: Search for a user where user_id is the target AND my_id is in their shared_with list
+    all_users = db_helper.users.find({}, {"user_id": 1}) 
+    for u in all_users:
+        user2 = u["user_id"]
+        permission_check = db_helper.users.find_one({
+            "user_id": my_id,
+            "shared_with": user2
+        })
+def search_user_metrics(my_id, target_id):
+    """
+    Checks if 'target_id' exists and if they have shared data with 'my_id'.
+    """
+    if not target_id:
+        return "⚠️ Please enter a User ID to search."
+    
+    target_id = target_id.lower().strip()
+    
+    # 1. Check if the user exists and if they shared with the logged-in user
+    # Logic: Search for a user where user_id is the target AND my_id is in their shared_with list
+    permission_check = db_helper.users.find_one({
+        "user_id": target_id,
+        "shared_with": my_id
+    })
 
-def handle_final_submit(uname, fname, pwd):
-    """The 'Register' logic: Saves to MongoDB and jumps to Login Tab"""
-    if not pwd or len(pwd) < 6:
-        return gr.Tabs(selected="signup_tab"), "❌ Password too short (min 6 characters)."
-    
-    # Check if user already exists in Abby's DB
-    if users_col.find_one({"username": uname}):
-        return gr.Tabs(selected="signup_tab"), "❌ Username already taken! Try another."
+    if not permission_check:
+        return f"❌ Access Denied: '{target_id}' has not shared their data with you, or the user does not exist."
 
-    # Create the user document
-    new_user = {
-        "username": uname,
-        "full_name": fname,
-        "password": pwd,  # Note: For a real launch, you'd use bcrypt to hash this
-        "role": "patient",
-        "created_at": "2026-02-21"
-    }
+    # 2. If valid, fetch their sessions
+    sessions = list(db_helper.sessions.find({"user_id": target_id}).sort("timestamp", -1))
     
-    # PERMANENT STORAGE IN MONGODB
-    users_col.insert_one(new_user)
+    if not sessions:
+        return f"✅ Access Verified for {permission_check.get('name', target_id)}, but no workout data was found."
     
-    # Return: Switch to login tab, show success message
-    return gr.Tabs(selected="login_tab"), f"✅ Welcome to the team, {uname}! Now login to start."
+    # 3. Format the stats
+    output = f"## 📈 Progress for {permission_check.get('name', target_id)}\n\n"
+    for s in sessions:
+        date_str = s['timestamp'].strftime("%Y-%m-%d %I:%M %p")
+        output += f"**{date_str}** | 🏃 {s['exercise']} | {s['reps']} Reps | {s['accuracy_score']}% Score\n\n---\n"
+    
+    return output
+
+def display_shared_metrics(target_user_id):
+    if not target_user_id: 
+        return "Select a user to view metrics."
+    # Queries the sessions collection for that specific user
+    sessions = list(db_helper.sessions.find({"user_id": target_user_id}).sort("timestamp", -1))
+    if not sessions:
+        return "No session data found for this user."
+    
+    output = "### 📊 Activity History\n\n"
+    for s in sessions:
+        date_str = s['timestamp'].strftime("%Y-%m-%d")
+        output += f"**{date_str}** | {s['exercise']} | {s['reps']} Reps | {s['accuracy_score']}% Accuracy\n\n"
+    return output
+def refresh_sharing_view(uid):
+    all_users = get_available_users()# Everyone in the system
+    already_shared = db_helper.check_shared(uid) # Only those shared with
+    
+    # We update the CheckboxGroup: 
+    # choices = everyone, value = only the ones currently shared
+    return gr.update(choices=all_users, value=already_shared)
+def launch_workout():
+    try:
+        # Note: Updated to handle both Windows and Mac paths
+        python_exe = os.path.join(os.path.dirname(__file__), "venv", "Scripts", "python.exe")
+        if not os.path.exists(python_exe): # Mac/Linux path
+            python_exe = os.path.join(os.path.dirname(__file__), "venv", "bin", "python")
+            
+        subprocess.Popen([python_exe, os.path.join(os.path.dirname(__file__), "yolo_test.py")])
+        return "[OK] Workout app launched! Check your separate window."
+    except Exception as e:
+        return f"[ERROR] Launch failed: {str(e)}"
+
+# --- 3. AUTH & NAVIGATION LOGIC ---
 
 def handle_login(username, password):
-    """Verification Logic: Queries MongoDB for the user"""
-    user = users_col.find_one({"username": username, "password": password})
+    if not username or not password:
+        return gr.update(visible=False), gr.update(visible=True), "⚠️ Enter both fields", "", ""
     
-    if user:
-        # Check if they have any saved exercise sessions
-        sessions = sessions_col.count_documents({"username": username})
-        return gr.Column(visible=True), f"✅ Logged in: **{user['full_name']}** | {sessions} Sessions Found"
-    
-    return gr.Column(visible=False), "❌ Invalid Credentials. Please register first."
+    success, profile = db_helper.login_user(username, password)
+    if success:
+        welcome_msg = f"## ✅ Welcome, {profile['name']}!"
+        return gr.update(visible=True), gr.update(visible=False), welcome_msg, username
+    return gr.update(visible=False), gr.update(visible=True), f"❌ {profile}", ""
+def handle_logout():
+    # Reverse the visibility
+    return gr.update(visible=False), gr.update(visible=True), "Logged out successfully."
 
-# --- 4. THE INTERFACE ---
+def handle_initial_register(uname, fname, email):
+    if not uname or not fname or not email:
+        return gr.update(visible=True), gr.update(visible=False), "⚠️ All fields are required."
+    return gr.update(visible=False), gr.update(visible=True), f"Almost there, {fname}! Create a secure password."
+
+def handle_final_signup(uname, pword, fname, email):
+    # Call the database helper to register
+    result = db_helper.register_new_user(uname, pword, fname, email)
+    if "Success" in result:
+        # Reset the view and go to login
+        return gr.Tabs(selected="login_tab"), gr.update(visible=True), gr.update(visible=False), f"✅ {result} Please Login."
+    else:
+        return gr.Tabs(selected="signup_tab"), gr.update(visible=False), gr.update(visible=True), f"❌ {result}"
+
+# --- 4. INTERFACE ---
+
 with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
-    
+    current_user_id = gr.State("")
+
     gr.Markdown("# 🛡️ <span class='lavender-text'>FlexRight</span>")
-    gr.Markdown("### AI-Powered Recovery & Skeletal Tracking")
     
-    with gr.Tabs() as main_tabs:
-        
-        # --- SIGN UP TAB ---
-        with gr.Tab("Sign Up", id="signup_tab"):
-            # Step 1: Info
-            with gr.Column(visible=True) as register_step:
-                gr.Markdown("### 👤 Step 1: Create Your Profile")
-                new_user_id = gr.Textbox(label="Username", placeholder="Choose a unique ID")
-                full_name = gr.Textbox(label="Full Name", placeholder="Your legal name")
-                register_btn = gr.Button("Register", variant="primary")
-            
-            # Step 2: Password (Hides step 1 when clicked)
-            with gr.Column(visible=False) as password_step:
-                gr.Markdown("### 🔐 Step 2: Set Your Security")
-                new_pwd = gr.Textbox(label="Create Password", type="password")
-                submit_btn = gr.Button("Complete Account Setup ✅", variant="primary")
+    # --- 1. THE LOGIN/SIGNUP GATE ---
+    with gr.Column(visible=True) as login_gate:
+        with gr.Tabs() as auth_tabs:
+            with gr.Tab("Login", id="login_tab"):
+                user_input = gr.Textbox(label="Username")
+                pass_input = gr.Textbox(label="Password", type="password")
+                login_btn = gr.Button("Login", variant="primary")
+                login_status = gr.Markdown()
 
-            signup_status = gr.Markdown()
+            with gr.Tab("Sign Up", id="signup_tab"):
+                # Step 1
+                with gr.Column(visible=True) as reg_step1:
+                    reg_user = gr.Textbox(label="Username")
+                    reg_name = gr.Textbox(label="Full Name")
+                    reg_email = gr.Textbox(label="Email")
+                    next_btn = gr.Button("Next Step")
+                # Step 2
+                with gr.Column(visible=False) as reg_step2:
+                    reg_pass = gr.Textbox(label="Password", type="password")
+                    finish_btn = gr.Button("Complete Account Setup ✅", variant="primary")
+                reg_status = gr.Markdown()
 
-        # --- LOGIN TAB ---
-        with gr.Tab("Login", id="login_tab"):
-            gr.Markdown("### 🔐 Secure Sign-In")
-            user_input = gr.Textbox(label="Username")
-            pass_input = gr.Textbox(label="Password", type="password")
-            login_btn = gr.Button("Login", variant="primary")
-            login_msg = gr.Markdown("Please sign in to access the Gym.")
+    # --- 2. PROTECTED APP CONTENT ---
+    with gr.Column(visible=False, variant="panel") as protected_view:
+        with gr.Row():
+            user_welcome = gr.Markdown("## Welcome back!")
+            logout_btn = gr.Button("Logout", variant="stop", size="sm")
 
-    # --- PROTECTED WORKSPACE (Hidden until login) ---
-    with gr.Column(visible=False) as protected_view:
-        with gr.Tab("The Gym"):
-            gr.Markdown("## 🏋️ Your Recovery Workspace")
-            with gr.Row():
-                webcam = gr.Image(sources=["webcam"], streaming=True, label="Live AI Skeletal Feed")
-                stats = gr.Label(label="Live Performance Metrics")
-        
-        with gr.Tab("Professional Portal"):
-            gr.Markdown("## 🏥 Clinical Telemetry")
-            client_id = gr.Dropdown(label="Authorized Client", choices=["Alex", "Jordan", "New User"])
-            plot = gr.Plot(label="Recovery Progress (Last 30 Days)")
+        with gr.Tabs():
+            with gr.Tab("The Gym"):
+                gr.Markdown("## 🏋️ User Workspace")
+                with gr.Row():
+                    launch_btn = gr.Button("▶️ Click to Start Workout", variant="primary", size="lg")
+                    stats_label = gr.Label(label="Session Highlights")
+                workout_status = gr.Markdown("Click the button to launch the AI camera.")
 
-    # --- THE WIRING ---
+            with gr.Tab("Privacy & Sharing"):
+                gr.Markdown("## 🔐 Manage Access")
+                with gr.Row():
+                    share_input = gr.Textbox(label="Grant Access to User", placeholder="Search by Username...")
+                    # THIS IS THE DEFINITION
+                    add_btn = gr.Button("Grant Access", variant="primary")
+                # This dropdown will display current shares as removable tags
+                    access_tags = gr.Dropdown(
+                        label="Users who can see your data",
+                        choices=get_available_users(), # All possible users
+                        multiselect=True,
+                        interactive=True,
+                        info="Remove a tag to revoke access instantly."
+                    )
+                
+                status_msg = gr.Markdown()
 
-    # 1. Register -> Reveal Password
-    register_btn.click(
-        fn=handle_initial_register, 
-        inputs=[new_user_id, full_name], 
-        outputs=[register_step, password_step, signup_status]
-    )
+            with gr.Tab("Shared Stats"):
+                gr.Markdown("## Progress Shared with You")
+                with gr.Row():
+                    search_input = gr.Textbox(label="Enter Username", placeholder="e.g. abby123")
+                    search_btn = gr.Button("Search Metrics", variant="primary")
+                metrics_display = gr.Markdown("Enter a username above to begin.")
 
-    # 2. Submit -> Save to MongoDB & Jump to Login
-    submit_btn.click(
-        fn=handle_final_submit,
-        inputs=[new_user_id, full_name, new_pwd],
-        outputs=[main_tabs, signup_status]
-    )
+    # --- 5. THE WIRING ---
 
-    # 3. Login -> Verify with MongoDB & Reveal Gym
+    # Login Logic
+   # 1. When the user logs in, populate the tags with their CURRENTLY shared users
     login_btn.click(
-        fn=handle_login, 
-        inputs=[user_input, pass_input], 
-        outputs=[protected_view, login_msg]
+        fn=handle_login,
+        inputs=[user_input, pass_input],
+        outputs=[protected_view, login_gate, user_welcome, current_user_id]
+    ).then(
+        fn=lambda uid: gr.update(value=db_helper.check_shared(uid)),
+        inputs=[current_user_id],
+        outputs=[access_tags]
     )
 
+    # 2. When the tags change (someone is added or an 'X' is clicked)
+    # We use the .change() event to sync the list to MongoDB
+
+    logout_btn.click(
+        fn=handle_logout,
+        outputs=[protected_view, login_gate, login_status]
+    )
+
+    # Signup Multi-step Logic
+    next_btn.click(handle_initial_register, [reg_user, reg_name, reg_email], [reg_step1, reg_step2, reg_status])
+    finish_btn.click(handle_final_signup, [reg_user, reg_pass, reg_name, reg_email], [auth_tabs, reg_step1, reg_step2, reg_status])
+
+    # Search and Sharing
+    search_btn.click(search_user_metrics, [current_user_id, search_input], metrics_display)
+    add_btn.click(
+    fn=db_helper.add_shared_access, # This adds the name to MongoDB
+    inputs=[current_user_id, share_input], 
+    outputs=status_msg
+).then(
+    fn=refresh_sharing_view, # This refreshes the tags so the new name appears
+    inputs=[current_user_id],
+    outputs=[access_tags]
+)
+
+# 2. The Tags handle the "X" (removals) and manual selection
+    access_tags.change(
+    fn=db_helper.sync_sharing, # This makes sure MongoDB matches exactly what tags are visible
+    inputs=[current_user_id, access_tags],
+    outputs=status_msg
+)
+    # App Logic
+    launch_btn.click(launch_workout, None, workout_status)
 if __name__ == "__main__":
-    demo.launch()
-    demo.launch(share=True, inbrowser=True)
+    demo.launch(inbrowser=True)
