@@ -6,19 +6,20 @@ import time
 import sys
 import json
 import os
+from data_manager import FlexDatabase
+from dotenv import load_dotenv
+import os
 
-# Get User ID from command line arguments
+load_dotenv()
+db_helper = FlexDatabase(os.getenv("MONGO_URI"))
 USER_ID = sys.argv[1] if len(sys.argv) > 1 else "guest_user"
-# UI font presets
 FONT_HEADER = cv2.FONT_HERSHEY_TRIPLEX
 FONT_LARGE  = cv2.FONT_HERSHEY_DUPLEX
 FONT_MED    = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SMALL  = cv2.FONT_HERSHEY_COMPLEX_SMALL
 
-# User ID passed from finaltest.py (optional – falls back to "guest")
 user_id = sys.argv[1] if len(sys.argv) > 1 else "guest"
 
-# --- STEP 1: Exercise selector pop-up ---
 exercise_choice = None
 rep_goal = 10
 
@@ -50,7 +51,7 @@ btn_frame.pack(pady=6)
 
 tk.Button(btn_frame, text="Bicep Curls", width=18, font=LAUNCH_BTN_FONT,
           bg="#E6E6FA", fg="#3A2B5A", activebackground="#D9D4F6", bd=0,
-          command=lambda: select_exercise("curl")).grid(row=0, column=0, padx=8, pady=6)
+          command=lambda: select_exercise("Bicep Curl")).grid(row=0, column=0, padx=8, pady=6)
 
 tk.Button(btn_frame, text="Squats", width=18, font=LAUNCH_BTN_FONT,
           bg="#E6E6FA", fg="#3A2B5A", activebackground="#D9D4F6", bd=0,
@@ -76,7 +77,6 @@ root.mainloop()
 if not exercise_choice:
     exercise_choice = "Bicep Curl"
 
-# --- STEP 2: Vision helpers ---
 def calculate_angle(a, b, c):
     a, b, c = np.array(a), np.array(b), np.array(c)
     radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
@@ -111,7 +111,6 @@ def draw_angle_arc(frame, p1, p2, p3, angle):
     cv2.putText(frame, f"{int(angle)} deg", (p2i[0]+15, p2i[1]-15),
                 FONT_MED, 0.7, (40, 40, 40), 2, cv2.LINE_AA)
 
-# --- STEP 3: Model + camera ---
 model = YOLO('yolov8n-pose.pt')
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
@@ -119,7 +118,6 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 cv2.namedWindow("FlexRight Coach", cv2.WINDOW_NORMAL)
 cv2.resizeWindow("FlexRight Coach", 1280, 720)
 
-# --- STEP 4: Countdown ---
 COUNTDOWN_SECONDS = 5
 countdown_start = time.time()
 
@@ -159,7 +157,6 @@ while True:
         cv2.destroyAllWindows()
         sys.exit(0)
 
-# --- STEP 5: Workout state ---
 counter      = 0
 stage        = "START"
 frame_height = None
@@ -175,21 +172,20 @@ right_state     = "START"
 left_frame_count  = 0
 right_frame_count = 0
 
-# Warning tracking
+#warnings
 warnings_log      = []
 last_warning_time = 0.0
 WARNING_COOLDOWN  = 1.5
 
-CURL_OVER_THRESH   = 160   # warn if arm not curled high enough at top of rep
-CURL_UNDER_THRESH  = 40    # warn if arm not fully lowered at bottom of rep
-SQUAT_OVER_THRESH  = 110   # warn if not squatting past here at bottom
-SQUAT_UNDER_THRESH = 55    # warn if squatting dangerously deep
+CURL_OVER_THRESH   = 160   #max arm angle
+CURL_UNDER_THRESH  = 40    #min arm angle
+SQUAT_OVER_THRESH  = 110   #warn if not squatting deep enough
+SQUAT_UNDER_THRESH = 55    #warn if squatting dangerously deep
 
 active_warning_text  = ""
 active_warning_color = (0, 0, 255)
 active_warning_until = 0.0
 
-# Rep congratulation state
 congrat_text  = ""
 congrat_until = 0.0
 CONGRATS = [
@@ -199,14 +195,11 @@ CONGRATS = [
 congrat_idx = 0
 
 def check_form_warnings(angle, stage, rep_count, exercise):
-    if exercise == "curl":
-        # Overextension: arm fully extended but not curled enough at the top
-        # Fires when in START (arm down/extended) and angle is too high (not curling)
+    if exercise == "Bicep Curl":
         if stage == "START" and angle > CURL_OVER_THRESH:
             return ("overextension",
                     f"Overextended – curl higher ({int(angle)} deg)",
                     (0, 165, 255))
-        # Underextension: arm not fully lowered at the bottom of the rep
         if stage == "DOWN" and angle < CURL_UNDER_THRESH:
             return ("underextension",
                     f"Underextended – lower your arm fully ({int(angle)} deg)",
@@ -223,7 +216,6 @@ def check_form_warnings(angle, stage, rep_count, exercise):
                         (0, 80, 255))
     return None
 
-# --- STEP 6: Main workout loop ---
 while cap.isOpened():
     success, frame = cap.read()
     if not success:
@@ -242,7 +234,7 @@ while cap.isOpened():
             draw_skeleton(frame, points)
 
             if len(points) >= 16:
-                if exercise_choice == "curl":
+                if exercise_choice == "Bicep Curl":
                     left_idx  = [5, 7, 9]
                     right_idx = [6, 8, 10]
                     start_thresh, end_thresh = 150, 55
@@ -301,7 +293,6 @@ while cap.isOpened():
                         angle = calculate_angle(points[11], points[13], points[15])
                         start_thresh, end_thresh = 160, 100
 
-                # Rep state machine
                 if angle is not None and not finished:                    
                     if stage == "START":
                         if angle < end_thresh:
@@ -322,7 +313,6 @@ while cap.isOpened():
                         else:
                             frame_count = 0
 
-                # Warning check
                 if angle is not None and not finished:
                     now = time.time()
                     if now - last_warning_time >= WARNING_COOLDOWN:
@@ -340,7 +330,6 @@ while cap.isOpened():
                     draw_angle_arc(frame, points[indices[0]], points[indices[1]],
                                    points[indices[2]], angle)
 
-    # --- HUD ---
     overlay    = frame.copy()
     hud_height = 130
     cv2.rectangle(overlay, (0, 0), (frame_width, hud_height), (250, 230, 250), -1)
@@ -377,9 +366,8 @@ while cap.isOpened():
 
     now = time.time()
 
-    # Congrats banner (green, bottom of HUD)
     if congrat_text and now < congrat_until:
-        alpha = min(1.0, (congrat_until - now) / 0.5)  # fade out last 0.5 s
+        alpha = min(1.0, (congrat_until - now) / 0.5) 
         cb_y1 = hud_height + 10
         cb_y2 = hud_height + 58
         cov = frame.copy()
@@ -389,7 +377,6 @@ while cap.isOpened():
         cv2.putText(frame, congrat_text, ((frame_width-cw)//2, cb_y1+36),
                     FONT_LARGE, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
 
-    # Warning banner (below congrats if both active, otherwise same slot)
     warn_y1 = (hud_height + 68) if (congrat_text and now < congrat_until) else (hud_height + 10)
     if active_warning_text and now < active_warning_until:
         wov = frame.copy()
@@ -431,7 +418,6 @@ while cap.isOpened():
 cap.release()
 cv2.destroyAllWindows()
 
-# --- STEP 7: Save session summary to a temp JSON file for the website ----
 over_count  = sum(1 for w in warnings_log if w["type"] == "overextension")
 under_count = sum(1 for w in warnings_log if w["type"] == "underextension")
 
@@ -450,7 +436,6 @@ session_summary = {
 summary_path = os.path.join(os.path.dirname(__file__), "session_result.json")
 with open(summary_path, "w") as f:
     json.dump(session_summary, f)
-
 print(f"Session saved → {summary_path}")
 sys.exit(0)
 
