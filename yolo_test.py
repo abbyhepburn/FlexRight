@@ -4,7 +4,15 @@ import numpy as np
 import tkinter as tk
 from tkinter import messagebox
 import time
+import sys
+from data_manager import FlexDatabase
+from dotenv import load_dotenv
+import os
+load_dotenv()
+db_helper = FlexDatabase(os.getenv("MONGO_URI"))
 
+# Get User ID from command line arguments
+USER_ID = sys.argv[1] if len(sys.argv) > 1 else "guest_user"
 # UI font presets
 FONT_HEADER = cv2.FONT_HERSHEY_TRIPLEX
 FONT_LARGE = cv2.FONT_HERSHEY_DUPLEX
@@ -44,7 +52,7 @@ btn_frame.pack(pady=6)
 
 btn_curl = tk.Button(btn_frame, text="Bicep Curls", width=18, font=LAUNCH_BTN_FONT,
                      bg="#E6E6FA", fg="#3A2B5A", activebackground="#D9D4F6", bd=0,
-                     command=lambda: select_exercise("curl"))
+                     command=lambda: select_exercise("Bicep Curl"))
 btn_curl.grid(row=0, column=0, padx=8, pady=6)
 
 btn_squat = tk.Button(btn_frame, text="Squats", width=18, font=LAUNCH_BTN_FONT,
@@ -66,8 +74,24 @@ root.mainloop()
 
 # If the user closes the window without picking, default to curl
 if not exercise_choice:
-    exercise_choice = "curl"
-
+    exercise_choice = "Bicep Curl"
+# Configuration for exercise targets
+EXERCISE_CONFIG = {
+    "Bicep Curl": {
+        "target_min": 40,   # Fully contracted
+        "target_max": 160,  # Fully extended
+        "range": 120,       # Total expected degrees
+        "feedback_up": "Curl higher!",
+        "feedback_down": "Lower all the way!"
+    },
+    "squat": {
+        "target_min": 85,   # Hips parallel
+        "target_max": 170,  # Standing straight
+        "range": 85,        # Total expected degrees
+        "feedback_up": "Stand up straight!",
+        "feedback_down": "Drop your hips lower!"
+    }
+}
 # --- STEP 2: The Vision Logic ---
 def calculate_angle(a, b, c):
     """Calculate angle between three points in degrees"""
@@ -115,6 +139,8 @@ cv2.namedWindow("FlexRight Coach", cv2.WINDOW_NORMAL)
 cv2.resizeWindow("FlexRight Coach", 1280, 720)
 
 counter = 0
+rep_angles = []  # To store the max and min angle of the current rep
+all_rep_scores = [] # To store the final accuracy of each completed rep
 stage = "START"
 frame_height = None
 frame_width = None
@@ -147,7 +173,7 @@ while cap.isOpened():
             draw_skeleton(frame, points)
 
             if len(points) >= 16:
-                if exercise_choice == "curl":
+                if exercise_choice == "Bicep Curl":
                     left_idx = [5, 7, 9]
                     right_idx = [6, 8, 10]
                     start_thresh, end_thresh = 160, 40
@@ -218,8 +244,14 @@ while cap.isOpened():
                         start_thresh, end_thresh = 170, 90
                         joint_idx = 13
 
+               # Get rules for current selection
+                config = EXERCISE_CONFIG.get(exercise_choice, EXERCISE_CONFIG["Bicep Curl"])
+                form_feedback = "Good Form" # Default state
+                
                 # shared rep state machine
                 if angle is not None and not finished:
+                    rep_angles.append(angle) 
+                    
                     if stage == "START":
                         if angle < end_thresh:
                             frame_count += 1
@@ -228,6 +260,7 @@ while cap.isOpened():
                                 frame_count = 0
                         else:
                             frame_count = 0
+                            
                     elif stage == "DOWN":
                         if angle > start_thresh:
                             frame_count += 1
@@ -235,6 +268,30 @@ while cap.isOpened():
                                 stage = "START"
                                 counter += 1
                                 frame_count = 0
+                                
+                                # --- DYNAMIC ACCURACY CALCULATION ---
+                                if len(rep_angles) > 0:
+                                    actual_min = min(rep_angles)
+                                    actual_max = max(rep_angles)
+                                    
+                                    # Calculate error relative to targets
+                                    min_err = max(0, actual_min - config["target_min"])
+                                    max_err = max(0, config["target_max"] - actual_max)
+                                    total_err = min_err + max_err
+                                    
+                                    # Score: 100 minus (error penalty)
+                                    rep_score = max(0, 100 - (total_err * 0.75))
+                                    all_rep_scores.append(rep_score)
+                                    
+                                    # Set feedback for the user to see on screen
+                                    if actual_min > (config["target_min"] + 15):
+                                        form_feedback = config["feedback_up"]
+                                    elif actual_max < (config["target_max"] - 15):
+                                        form_feedback = config["feedback_down"]
+                                    else:
+                                        form_feedback = "Perfect!"
+                                    
+                                    rep_angles = [] 
                         else:
                             frame_count = 0
 
@@ -309,5 +366,19 @@ cv2.destroyAllWindows()
 print(f"Workout Complete! Total Reps: {counter} / {rep_goal}")
 if counter >= rep_goal:
     print("🎉 Goal Reached! Great job!")
+if counter > 0:
+    # Calculate average accuracy from all completed reps
+    final_accuracy = int(sum(all_rep_scores) / len(all_rep_scores)) if all_rep_scores else 0
+    
+    # We pass the real calculated accuracy instead of 85
+    db_helper.save_workout_session(
+        user_id=USER_ID, 
+        exercise=exercise_choice, 
+        reps=counter,
+        accuracy=final_accuracy
+    )
+    print(f"✅ Session Saved! Accuracy: {final_accuracy}%")
+
+print(f"Workout Complete! Total Reps: {counter} / {rep_goal}")
 import sys
 sys.exit(0)

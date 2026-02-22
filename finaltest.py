@@ -89,6 +89,40 @@ def display_shared_metrics(target_user_id):
         date_str = s['timestamp'].strftime("%Y-%m-%d")
         output += f"**{date_str}** | {s['exercise']} | {s['reps']} Reps | {s['accuracy_score']}% Accuracy\n\n"
     return output
+def get_live_metrics(uid):
+    if not uid:
+        return {}, "### ⚠️ Please log in to view your metrics."
+    
+    # 1. Fetch the 10 most recent sessions for this user
+    sessions = list(db_helper.sessions.find({"user_id": uid}).sort("timestamp", -1).limit(10))
+    
+    if not sessions:
+        return {"No Data": 0}, "### 🏋️ No workout data found yet. Start a session in 'The Gym'!"
+
+    # 2. Extract the latest session
+    latest = sessions[0]
+    
+    # 3. Format the Label Data (The 'Form Accuracy' ring)
+    # Gradio Labels expect a float between 0 and 1 for the 'confidence' bar look
+    label_data = {
+        "Overall Form Accuracy": latest.get('accuracy_score', 0) / 100
+    }
+
+    # 4. Format the History Markdown Table
+    # We use a Markdown table for a cleaner, professional look
+    history_md = f"## 🔥 Latest Session: {latest['reps']} Reps of {latest['exercise']}\n"
+    history_md += f"### Average Form: {latest.get('accuracy_score', 0)}%\n"
+    history_md += "---\n"
+    history_md += "### 📜 Activity Log\n"
+    history_md += "| Date | Exercise | Reps | Accuracy |\n"
+    history_md += "|:--- |:--- |:--- |:--- |\n"
+    
+    for s in sessions:
+        # Format the timestamp nicely (e.g., Oct 24, 02:30 PM)
+        date_str = s['timestamp'].strftime("%b %d, %I:%M %p")
+        history_md += f"| {date_str} | {s['exercise']} | {s['reps']} | {s.get('accuracy_score', 0)}% |\n"
+        
+    return label_data, history_md
 def refresh_sharing_view(uid):
     all_users = get_available_users()# Everyone in the system
     already_shared = db_helper.check_shared(uid) # Only those shared with
@@ -96,17 +130,20 @@ def refresh_sharing_view(uid):
     # We update the CheckboxGroup: 
     # choices = everyone, value = only the ones currently shared
     return gr.update(choices=all_users, value=already_shared)
-def launch_workout():
+def launch_workout(uid):
+    if not uid:
+        return "⚠️ Please login first."
     try:
-        # Note: Updated to handle both Windows and Mac paths
-        python_exe = os.path.join(os.path.dirname(__file__), "venv", "Scripts", "python.exe")
-        if not os.path.exists(python_exe): # Mac/Linux path
-            python_exe = os.path.join(os.path.dirname(__file__), "venv", "bin", "python")
+        # Get path to your python executable
+        python_exe = os.path.join(os.path.dirname(__file__), "venv", "bin", "python")
+        if os.name == 'nt':
+            python_exe = os.path.join(os.path.dirname(__file__), "venv", "Scripts", "python.exe")
             
-        subprocess.Popen([python_exe, os.path.join(os.path.dirname(__file__), "yolo_test.py")])
-        return "[OK] Workout app launched! Check your separate window."
+        # PASS 'uid' as a command line argument
+        subprocess.Popen([python_exe, os.path.join(os.path.dirname(__file__), "yolo_test.py"), uid])
+        return f"🚀 Workout launched for {uid}!"
     except Exception as e:
-        return f"[ERROR] Launch failed: {str(e)}"
+        return f"❌ Launch failed: {str(e)}"
 
 # --- 3. AUTH & NAVIGATION LOGIC ---
 
@@ -116,7 +153,7 @@ def handle_login(username, password):
     
     success, profile = db_helper.login_user(username, password)
     if success:
-        welcome_msg = f"## ✅ Welcome, {profile['name']}!"
+        welcome_msg = f"##Welcome!"
         return gr.update(visible=True), gr.update(visible=False), welcome_msg, username
     return gr.update(visible=False), gr.update(visible=True), f"❌ {profile}", ""
 def handle_logout():
@@ -136,7 +173,9 @@ def handle_final_signup(uname, pword, fname, email):
         return gr.Tabs(selected="login_tab"), gr.update(visible=True), gr.update(visible=False), f"✅ {result} Please Login."
     else:
         return gr.Tabs(selected="signup_tab"), gr.update(visible=False), gr.update(visible=True), f"❌ {result}"
-
+def refresh_ui_data(uid):
+    label_output, markdown_output = get_live_metrics(uid)
+    return label_output, markdown_output
 # --- 4. INTERFACE ---
 
 with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
@@ -166,20 +205,26 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
                     finish_btn = gr.Button("Complete Account Setup ✅", variant="primary")
                 reg_status = gr.Markdown()
 
-    # --- 2. PROTECTED APP CONTENT ---
+   # --- 2. PROTECTED APP CONTENT ---
     with gr.Column(visible=False, variant="panel") as protected_view:
         with gr.Row():
             user_welcome = gr.Markdown("## Welcome back!")
             logout_btn = gr.Button("Logout", variant="stop", size="sm")
 
+        # Tabs should be directly under protected_view
         with gr.Tabs():
             with gr.Tab("The Gym"):
                 gr.Markdown("## 🏋️ User Workspace")
                 with gr.Row():
-                    launch_btn = gr.Button("▶️ Click to Start Workout", variant="primary", size="lg")
-                    stats_label = gr.Label(label="Session Highlights")
-                workout_status = gr.Markdown("Click the button to launch the AI camera.")
-
+                    launch_btn = gr.Button("▶️ Start Workout", variant="primary")
+                    refresh_btn = gr.Button("🔄 Refresh Stats")
+                
+                # Added workout_status back so the launch button works
+                workout_status = gr.Markdown("Ready to train?") 
+                
+                with gr.Row():
+                    stats_label = gr.Label(label="Latest Session Highlights")
+                    history_display = gr.Markdown("History will appear here...")
             with gr.Tab("Privacy & Sharing"):
                 gr.Markdown("## 🔐 Manage Access")
                 with gr.Row():
@@ -206,49 +251,58 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
 
     # --- 5. THE WIRING ---
 
-    # Login Logic
-   # 1. When the user logs in, populate the tags with their CURRENTLY shared users
+    # 1. Login & Auto-Refresh
     login_btn.click(
         fn=handle_login,
         inputs=[user_input, pass_input],
         outputs=[protected_view, login_gate, user_welcome, current_user_id]
+    ).then(
+        fn=refresh_ui_data, 
+        inputs=[current_user_id],
+        outputs=[stats_label, history_display]
     ).then(
         fn=lambda uid: gr.update(value=db_helper.check_shared(uid)),
         inputs=[current_user_id],
         outputs=[access_tags]
     )
 
-    # 2. When the tags change (someone is added or an 'X' is clicked)
-    # We use the .change() event to sync the list to MongoDB
-
-    logout_btn.click(
-        fn=handle_logout,
-        outputs=[protected_view, login_gate, login_status]
+    # 2. Manual Refresh Logic
+    refresh_btn.click(
+    fn=refresh_ui_data,
+    inputs=[current_user_id],
+    outputs=[stats_label, history_display]
     )
 
-    # Signup Multi-step Logic
+    # 3. Workout Launch
+    launch_btn.click(
+        fn=launch_workout, 
+        inputs=[current_user_id], 
+        outputs=workout_status
+    )
+
+    # 4. Sharing & Search Logic
+    search_btn.click(search_user_metrics, [current_user_id, search_input], metrics_display)
+    
+    add_btn.click(
+        fn=db_helper.add_shared_access, 
+        inputs=[current_user_id, share_input], 
+        outputs=status_msg
+    ).then(
+        fn=refresh_sharing_view, 
+        inputs=[current_user_id],
+        outputs=[access_tags]
+    )
+
+    access_tags.change(
+        fn=db_helper.sync_sharing, 
+        inputs=[current_user_id, access_tags],
+        outputs=status_msg
+    )
+
+    # 5. Logout & Signup
+    logout_btn.click(fn=handle_logout, outputs=[protected_view, login_gate, login_status])
     next_btn.click(handle_initial_register, [reg_user, reg_name, reg_email], [reg_step1, reg_step2, reg_status])
     finish_btn.click(handle_final_signup, [reg_user, reg_pass, reg_name, reg_email], [auth_tabs, reg_step1, reg_step2, reg_status])
 
-    # Search and Sharing
-    search_btn.click(search_user_metrics, [current_user_id, search_input], metrics_display)
-    add_btn.click(
-    fn=db_helper.add_shared_access, # This adds the name to MongoDB
-    inputs=[current_user_id, share_input], 
-    outputs=status_msg
-).then(
-    fn=refresh_sharing_view, # This refreshes the tags so the new name appears
-    inputs=[current_user_id],
-    outputs=[access_tags]
-)
-
-# 2. The Tags handle the "X" (removals) and manual selection
-    access_tags.change(
-    fn=db_helper.sync_sharing, # This makes sure MongoDB matches exactly what tags are visible
-    inputs=[current_user_id, access_tags],
-    outputs=status_msg
-)
-    # App Logic
-    launch_btn.click(launch_workout, None, workout_status)
 if __name__ == "__main__":
     demo.launch(inbrowser=True)

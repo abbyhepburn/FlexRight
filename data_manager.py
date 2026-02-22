@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import certifi
 import bcrypt
 load_dotenv()
-#creation of class to allow functions to be accesed easier
+from datetime import datetime
 class FlexDatabase:
     def __init__(self, connection_string):
         #connect to MongoDB
@@ -128,3 +128,18 @@ class FlexDatabase:
             {"$set": {"shared_with": selected_list}}
         )
         return f"Permissions updated: {len(selected_list)} users authorized."
+    # Add this to FlexDatabase in data_manager.py
+
+    def save_workout_session(self, user_id, exercise, reps, accuracy=90):
+        session_data = {
+            "user_id": user_id,
+            "exercise": exercise,
+            "reps": reps,
+            "accuracy_score": accuracy,
+            "timestamp": datetime.now() # Saves exact date and time
+        }
+        try:
+            self.sessions.insert_one(session_data)
+            print(f"✅ Session saved for {user_id}: {reps} {exercise}")
+        except Exception as e:
+            print(f"❌ Error saving session: {e}")
