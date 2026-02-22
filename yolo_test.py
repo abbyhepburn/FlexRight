@@ -246,7 +246,8 @@ while cap.isOpened():
 
                # Get rules for current selection
                 config = EXERCISE_CONFIG.get(exercise_choice, EXERCISE_CONFIG["Bicep Curl"])
-                form_feedback = "Good Form" # Default state
+                # Default: no live warning shown
+                warning_text = ""
                 
                 # shared rep state machine
                 if angle is not None and not finished:
@@ -297,6 +298,31 @@ while cap.isOpened():
 
                 if angle is not None:
                     draw_angle_arc(frame, points[indices[0]], points[indices[1]], points[indices[2]], angle)
+
+                # Live warning rules:
+                # - Bicep Curl: warn if overextending (>160) or underextending (<40)
+                # - Squat: when in the lowered 'DOWN' stage, hip/knee angle should be between 60 and 80 degrees
+                if angle is not None:
+                    if exercise_choice == "Bicep Curl":
+                        if angle > 160:
+                            warning_text = "Warning: Overextending!"
+                        elif angle < 40:
+                            warning_text = "Warning: Underextending!"
+                    else:
+                        # Squat warnings apply when in the lowered (middle) stage
+                        if stage == "DOWN":
+                            if angle < 60:
+                                warning_text = "Warning: Not low enough!"
+                            elif angle > 80:
+                                warning_text = "Warning: Drop hips lower!"
+
+                # Render warning on HUD if present
+                if warning_text:
+                    (wt_w, wt_h), _ = cv2.getTextSize(warning_text, FONT_MED, 0.8, 2)
+                    wt_x = (frame_width - wt_w) // 2
+                    wt_y = hud_height + 30
+                    cv2.rectangle(frame, (wt_x - 12, wt_y - wt_h - 8), (wt_x + wt_w + 12, wt_y + 8), (30, 30, 180), -1)
+                    cv2.putText(frame, warning_text, (wt_x, wt_y), FONT_MED, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
     # HUD - lavender translucent header
     overlay = frame.copy()
