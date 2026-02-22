@@ -128,3 +128,30 @@ class FlexDatabase:
             {"$set": {"shared_with": selected_list}}
         )
         return f"Permissions updated: {len(selected_list)} users authorized."
+
+    def save_session_summary(self, user_id, exercise, reps, rep_goal, warnings):
+        """Saves a full session including the warnings log to MongoDB."""
+        over_count  = sum(1 for w in warnings if w["type"] == "overextension")
+        under_count = sum(1 for w in warnings if w["type"] == "underextension")
+        total = len(warnings)
+        accuracy = max(0, round(100 - (total / max(reps, 1)) * 20))
+        session_data = {
+            "user_id":      user_id,
+            "exercise":     exercise,
+            "reps":         reps,
+            "rep_goal":     rep_goal,
+            "accuracy_score": accuracy,
+            "warnings":     warnings,
+            "over_count":   over_count,
+            "under_count":  under_count,
+            "timestamp":    datetime.datetime.now()
+        }
+        self.sessions.insert_one(session_data)
+        return "Session saved!"
+
+    def get_latest_session_summary(self, user_id):
+        """Returns the most recent session document for a user."""
+        return self.sessions.find_one(
+            {"user_id": user_id},
+            sort=[("timestamp", -1)]
+        )

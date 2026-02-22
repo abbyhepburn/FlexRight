@@ -1,26 +1,31 @@
 import gradio as gr
 import pymongo
 import certifi
+import os
+import numpy as np
+import cv2
+from ultralytics import YOLO
 
-# --- 1. MONGODB CONNECTION ---
-# Using the credentials provided by Member 2 (Abby)
+# --- 1. INITIALIZATION ---
+model = YOLO('yolov8n-pose.pt')
+counter = 0
+stage = "UP"
+
+# --- 2. MONGODB CONNECTION ---
 MONGO_URI = "mongodb+srv://abbyhepburn526:AbbyMay26!@flexcluster.sdbddiz.mongodb.net/?appName=FlexCluster"
 
 try:
-    # certifi.where() is crucial for connecting from different laptops safely
-    client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-    db = client["FlexCluster"] # Database Name
-    
-    # Using Member 2's specific Collection names
+    client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+    db = client["FlexCluster"]
     users_col = db["users"]
     exercises_col = db["exercises"]
     sessions_col = db["sessions"]
-    
-    print("✅ Connection Successful: FlexCluster is Live!")
+    print("[OK] Connection Successful: FlexCluster is Live!")
 except Exception as e:
-    print(f"❌ Connection Error: {e}")
+    print(f"[ERROR] Connection Error: {e}")
+    users_col = exercises_col = sessions_col = None
 
-# --- 2. THE CUSTOM UI STYLING ---
+# --- 3. CUSTOM UI STYLING ---
 custom_css = """
 .gradio-container {background-color: #FFFFFF !important}
 footer {display: none !important} 
@@ -34,51 +39,93 @@ flex_theme = gr.themes.Soft(primary_hue="purple", neutral_hue="slate").set(
     button_primary_text_color="white",
 )
 
-# --- 3. BACKEND LOGIC ---
+# --- 4. BACKEND LOGIC ---
+
+def calculate_angle(a, b, c):
+    """Math logic for Member 1"""
+    a, b, c = np.array(a), np.array(b), np.array(c)
+    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
+    angle = np.abs(radians * 180.0 / np.pi)
+    return 360 - angle if angle > 180.0 else angle
+
+def predict_pose(img):
+    global counter, stage 
+    
+    if img is None:
+        return None
+    
+    # Convert Gradio (RGB) to OpenCV (BGR)
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    results = model(img_bgr, verbose=False)
+    
+    # Logic for counting
+    for r in results:
+        if r.keypoints is not None and len(r.keypoints.xy) > 0:
+            points = r.keypoints.xy[0].cpu().numpy()
+            
+            # Check for Left Arm: Shoulder(5), Elbow(7), Wrist(9)
+            if len(points) > 9:
+                p5, p7, p9 = points[5], points[7], points[9]
+                
+                # Only calculate if points are visible (not [0,0])
+                if p7[0] > 0 and p9[0] > 0:
+                    angle = calculate_angle(p5, p7, p9)
+
+                    # Curl State Machine
+                    if angle > 160:
+                        stage = "DOWN"
+                    if angle < 30 and stage == "DOWN":
+                        stage = "UP"
+                        counter += 1
+
+    # Get the skeleton drawing
+    annotated_frame = results[0].plot()
+    
+    # Draw the count on the frame
+    # (Using BGR colors: (75, 0, 130) is a deep purple)
+    cv2.putText(annotated_frame, f"Reps: {counter}", (50, 80), 
+                cv2.FONT_HERSHEY_DUPLEX, 1.5, (75, 0, 130), 3)
+    cv2.putText(annotated_frame, f"Stage: {stage}", (50, 130), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
+                
+    # Convert back to RGB for Gradio
+    return cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
 
 def handle_initial_register(uname, fname):
-    """Transitions from Name entry to Password entry"""
     if not uname or not fname:
-        return gr.Column(visible=True), gr.Column(visible=False), "⚠️ Please enter a Username and Full Name."
+        return gr.Column(visible=True), gr.Column(visible=False), "[WARNING] Please enter a Username and Full Name."
     return gr.Column(visible=False), gr.Column(visible=True), f"Almost there, {fname}! Create a secure password."
 
 def handle_final_submit(uname, fname, pwd):
-    """The 'Register' logic: Saves to MongoDB and jumps to Login Tab"""
     if not pwd or len(pwd) < 6:
-        return gr.Tabs(selected="signup_tab"), "❌ Password too short (min 6 characters)."
+        return gr.Tabs(selected="signup_tab"), "[ERROR] Password too short (min 6 characters)."
+    if users_col is None:
+        return gr.Tabs(selected="signup_tab"), "[WARNING] Database offline."
     
-    # Check if user already exists in Abby's DB
     if users_col.find_one({"username": uname}):
-        return gr.Tabs(selected="signup_tab"), "❌ Username already taken! Try another."
+        return gr.Tabs(selected="signup_tab"), "[ERROR] Username already taken!"
 
-    # Create the user document
     new_user = {
-        "username": uname,
-        "full_name": fname,
-        "password": pwd,  # Note: For a real launch, you'd use bcrypt to hash this
-        "role": "patient",
-        "created_at": "2026-02-21"
+        "username": uname, "full_name": fname, "password": pwd,
+        "role": "patient", "created_at": "2026-02-21"
     }
-    
-    # PERMANENT STORAGE IN MONGODB
     users_col.insert_one(new_user)
-    
-    # Return: Switch to login tab, show success message
-    return gr.Tabs(selected="login_tab"), f"✅ Welcome to the team, {uname}! Now login to start."
+    return gr.Tabs(selected="login_tab"), f"[OK] Welcome, {uname}! Now login."
 
 def handle_login(username, password):
-    """Verification Logic: Queries MongoDB for the user"""
-    user = users_col.find_one({"username": username, "password": password})
+    DEMO_CREDENTIALS = {"demo": "demo123", "test": "test123"}
+    if username in DEMO_CREDENTIALS and DEMO_CREDENTIALS[username] == password:
+        return gr.Column(visible=True), f"[OK] Demo Login Successful! Welcome, {username}!"
     
-    if user:
-        # Check if they have any saved exercise sessions
-        sessions = sessions_col.count_documents({"username": username})
-        return gr.Column(visible=True), f"✅ Logged in: **{user['full_name']}** | {sessions} Sessions Found"
+    if users_col is not None:
+        user = users_col.find_one({"username": username, "password": password})
+        if user:
+            return gr.Column(visible=True), f"[OK] Logged in: **{user['full_name']}**"
     
-    return gr.Column(visible=False), "❌ Invalid Credentials. Please register first."
+    return gr.Column(visible=False), "[ERROR] Invalid Credentials."
 
-# --- 4. THE INTERFACE ---
-with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
+# --- 5. THE INTERFACE ---
+with gr.Blocks(title="FlexRight", theme=flex_theme, css=custom_css) as demo:
     
     gr.Markdown("# 🛡️ <span class='lavender-text'>FlexRight</span>")
     gr.Markdown("### AI-Powered Recovery & Skeletal Tracking")
@@ -87,14 +134,12 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
         
         # --- SIGN UP TAB ---
         with gr.Tab("Sign Up", id="signup_tab"):
-            # Step 1: Info
             with gr.Column(visible=True) as register_step:
                 gr.Markdown("### 👤 Step 1: Create Your Profile")
-                new_user_id = gr.Textbox(label="Username", placeholder="Choose a unique ID")
-                full_name = gr.Textbox(label="Full Name", placeholder="Your legal name")
+                new_user_id = gr.Textbox(label="Username")
+                full_name = gr.Textbox(label="Full Name")
                 register_btn = gr.Button("Register", variant="primary")
             
-            # Step 2: Password (Hides step 1 when clicked)
             with gr.Column(visible=False) as password_step:
                 gr.Markdown("### 🔐 Step 2: Set Your Security")
                 new_pwd = gr.Textbox(label="Create Password", type="password")
@@ -110,59 +155,25 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
             login_btn = gr.Button("Login", variant="primary")
             login_msg = gr.Markdown("Please sign in to access the Gym.")
 
-    # --- PROTECTED WORKSPACE (Hidden until login) ---
+    # --- PROTECTED WORKSPACE ---
     with gr.Column(visible=False) as protected_view:
-        with gr.Tab("The Gym"):
-            gr.Markdown("## 🏋️ Your Recovery Workspace")
-            with gr.Row():
-                webcam = gr.Image(sources=["webcam"], streaming=True, label="Live AI Skeletal Feed")
-                stats = gr.Label(label="Live Performance Metrics")
-        
-        with gr.Tab("Professional Portal"):
-            gr.Markdown("## 🏥 Clinical Telemetry")
-            client_id = gr.Dropdown(label="Authorized Client", choices=["Alex", "Jordan", "New User"])
-            plot = gr.Plot(label="Recovery Progress (Last 30 Days)")
+        with gr.Tabs():
+            with gr.Tab("The Gym"):
+                gr.Markdown("## Live AI Skeletal Tracking")
+                webcam = gr.Image(sources=["webcam"], streaming=True, label="AI Feed")
+                # Wiring the stream
+                webcam.stream(fn=predict_pose, inputs=webcam, outputs=webcam, time_interval=0.1)
+                workout_status = gr.Markdown("Position yourself in the camera to see the tracking.")
 
-    # --- THE WIRING ---
+            with gr.Tab("Professional Portal"):
+                gr.Markdown("## [HOSPITAL] Clinical Telemetry")
+                client_id = gr.Dropdown(label="Authorized Client", choices=["Alex", "Jordan", "New User"])
+                gr.Markdown("*(Database Reports loading...)*")
 
-    # 1. Register -> Reveal Password
-    register_btn.click(
-        fn=handle_initial_register, 
-        inputs=[new_user_id, full_name], 
-        outputs=[register_step, password_step, signup_status]
-    )
-
-    # 2. Submit -> Save to MongoDB & Jump to Login
-    submit_btn.click(
-        fn=handle_final_submit,
-        inputs=[new_user_id, full_name, new_pwd],
-        outputs=[main_tabs, signup_status]
-    )
-
-    # 3. Login -> Verify with MongoDB & Reveal Gym
-    login_btn.click(
-        fn=handle_login, 
-        inputs=[user_input, pass_input], 
-        outputs=[protected_view, login_msg]
-    )
+    # --- THE WIRING ----
+    register_btn.click(fn=handle_initial_register, inputs=[new_user_id, full_name], outputs=[register_step, password_step, signup_status])
+    submit_btn.click(fn=handle_final_submit, inputs=[new_user_id, full_name, new_pwd], outputs=[main_tabs, signup_status])
+    login_btn.click(fn=handle_login, inputs=[user_input, pass_input], outputs=[protected_view, login_msg])
 
 if __name__ == "__main__":
-    demo.launch()
-    demo.launch(share=True, inbrowser=True)
-
-
-# with gr.Tabs():
-#             # TAB: THE GYM (Member 1)
-#             with gr.Tab("The Gym"):
-#                 gr.Markdown("## User Workspace")
-#                 with gr.Row():
-#                     launch_btn = gr.Button("[PLAY] Click to Start Workout", variant="primary", size="lg", scale=1)
-#                     stats = gr.Label(label="Live Performance Metrics")
-                
-#                 workout_status = gr.Markdown("Click the button to launch your workout program")
-
-#  # Launch Workout Button
-#     launch_btn.click(
-#         fn=launch_workout,
-#         outputs=workout_status
-#     )
+    demo.launch(share=True)

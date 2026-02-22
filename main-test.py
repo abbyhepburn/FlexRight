@@ -165,7 +165,7 @@ with gr.Blocks(title="FlexRight: Secure AI Recovery") as demo:
         outputs=[protected_view, login_gate, login_status]
     )
 
-    # Sharing Logic
+    # Sharing Logics
     add_btn.click(
         fn=lambda u, t: db_helper.add_shared_access(u, t), 
         inputs=[current_user_id, share_input], 
