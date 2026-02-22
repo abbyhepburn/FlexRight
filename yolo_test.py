@@ -57,12 +57,12 @@ tk.Button(btn_frame, text="Squats", width=18, font=LAUNCH_BTN_FONT,
           command=lambda: select_exercise("squat")).grid(row=0, column=1, padx=8, pady=6)
 
 tk.Button(btn_frame, text="Push-ups", width=18, font=LAUNCH_BTN_FONT,
-          bg="#E6E6FA", fg="#9A9AB0", activebackground="#D9D4F6", bd=0,
-          state="disabled").grid(row=1, column=0, padx=8, pady=6)
+          bg="#E6E6FA", fg="#3A2B5A", activebackground="#D9D4F6", bd=0,
+          command=lambda: select_exercise("pushup")).grid(row=1, column=0, padx=8, pady=6)
 
 tk.Button(btn_frame, text="Lateral Raises", width=18, font=LAUNCH_BTN_FONT,
-          bg="#E6E6FA", fg="#9A9AB0", activebackground="#D9D4F6", bd=0,
-          state="disabled").grid(row=1, column=1, padx=8, pady=6)
+          bg="#E6E6FA", fg="#3A2B5A", activebackground="#D9D4F6", bd=0,
+          command=lambda: select_exercise("lateral")).grid(row=1, column=1, padx=8, pady=6)
 
 tk.Label(root, text="Rep Goal:", font=LAUNCH_FONT_LABEL,
          bg="#F6F3FB", fg="#3A2B5A").pack(pady=(18, 6))
@@ -74,7 +74,7 @@ tk.Entry(root, textvariable=rep_var, font=LAUNCH_FONT_LABEL,
 root.mainloop()
 
 if not exercise_choice:
-    exercise_choice = "curl"
+    exercise_choice = "Bicep Curl"
 
 # --- STEP 2: Vision helpers ---
 def calculate_angle(a, b, c):
@@ -199,7 +199,7 @@ CONGRATS = [
 congrat_idx = 0
 
 def check_form_warnings(angle, stage, rep_count, exercise):
-    if exercise == "curl":
+    if exercise == "Bicep Curl":
         if stage == "DOWN" and angle < CURL_UNDER_THRESH:
             return ("underextension",
                     f"Underextended – arm not fully extended ({int(angle)} deg)",
@@ -239,7 +239,7 @@ while cap.isOpened():
             draw_skeleton(frame, points)
 
             if len(points) >= 16:
-                if exercise_choice == "curl":
+                if exercise_choice == "Bicep Curl":
                     left_idx  = [5, 7, 9]
                     right_idx = [6, 8, 10]
                     start_thresh, end_thresh = 150, 55
@@ -299,9 +299,7 @@ while cap.isOpened():
                         start_thresh, end_thresh = 160, 100
 
                 # Rep state machine
-                if angle is not None and not finished:
-                    rep_angles.append(angle) 
-                    
+                if angle is not None and not finished:                    
                     if stage == "START":
                         if angle < end_thresh:
                             frame_count += 1
