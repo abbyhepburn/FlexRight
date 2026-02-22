@@ -180,8 +180,8 @@ warnings_log      = []
 last_warning_time = 0.0
 WARNING_COOLDOWN  = 1.5
 
-CURL_OVER_THRESH   = 170   # warn if angle reaches here (overextension)
-CURL_UNDER_THRESH  = 20    # warn if angle drops to here (underextension)
+CURL_OVER_THRESH   = 160   # warn if arm not curled high enough at top of rep
+CURL_UNDER_THRESH  = 40    # warn if arm not fully lowered at bottom of rep
 SQUAT_OVER_THRESH  = 110   # warn if not squatting past here at bottom
 SQUAT_UNDER_THRESH = 55    # warn if squatting dangerously deep
 
@@ -199,15 +199,18 @@ CONGRATS = [
 congrat_idx = 0
 
 def check_form_warnings(angle, stage, rep_count, exercise):
-    if exercise == "Bicep Curl":
-        if stage == "DOWN" and angle < CURL_UNDER_THRESH:
-            return ("underextension",
-                    f"Underextended – arm not fully extended ({int(angle)} deg)",
-                    (0, 80, 255))
+    if exercise == "curl":
+        # Overextension: arm fully extended but not curled enough at the top
+        # Fires when in START (arm down/extended) and angle is too high (not curling)
         if stage == "START" and angle > CURL_OVER_THRESH:
             return ("overextension",
                     f"Overextended – curl higher ({int(angle)} deg)",
                     (0, 165, 255))
+        # Underextension: arm not fully lowered at the bottom of the rep
+        if stage == "DOWN" and angle < CURL_UNDER_THRESH:
+            return ("underextension",
+                    f"Underextended – lower your arm fully ({int(angle)} deg)",
+                    (0, 80, 255))
     elif exercise == "squat":
         if stage == "DOWN":
             if angle > SQUAT_OVER_THRESH:
@@ -239,7 +242,7 @@ while cap.isOpened():
             draw_skeleton(frame, points)
 
             if len(points) >= 16:
-                if exercise_choice == "Bicep Curl":
+                if exercise_choice == "curl":
                     left_idx  = [5, 7, 9]
                     right_idx = [6, 8, 10]
                     start_thresh, end_thresh = 150, 55
@@ -450,3 +453,4 @@ with open(summary_path, "w") as f:
 
 print(f"Session saved → {summary_path}")
 sys.exit(0)
+

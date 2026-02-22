@@ -301,3 +301,4 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
 
 if __name__ == "__main__":
     demo.launch(inbrowser=True)
+#end
