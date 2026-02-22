@@ -57,12 +57,12 @@ tk.Button(btn_frame, text="Squats", width=18, font=LAUNCH_BTN_FONT,
           command=lambda: select_exercise("squat")).grid(row=0, column=1, padx=8, pady=6)
 
 tk.Button(btn_frame, text="Push-ups", width=18, font=LAUNCH_BTN_FONT,
-          bg="#E6E6FA", fg="#9A9AB0", activebackground="#D9D4F6", bd=0,
-          state="disabled").grid(row=1, column=0, padx=8, pady=6)
+          bg="#E6E6FA", fg="#3A2B5A", activebackground="#D9D4F6", bd=0,
+          command=lambda: select_exercise("pushup")).grid(row=1, column=0, padx=8, pady=6)
 
 tk.Button(btn_frame, text="Lateral Raises", width=18, font=LAUNCH_BTN_FONT,
-          bg="#E6E6FA", fg="#9A9AB0", activebackground="#D9D4F6", bd=0,
-          state="disabled").grid(row=1, column=1, padx=8, pady=6)
+          bg="#E6E6FA", fg="#3A2B5A", activebackground="#D9D4F6", bd=0,
+          command=lambda: select_exercise("lateral")).grid(row=1, column=1, padx=8, pady=6)
 
 tk.Label(root, text="Rep Goal:", font=LAUNCH_FONT_LABEL,
          bg="#F6F3FB", fg="#3A2B5A").pack(pady=(18, 6))
