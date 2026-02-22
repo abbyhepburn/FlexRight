@@ -71,7 +71,6 @@ class FlexDatabase:
             "target_angle": observed_angle,
             "created_at": datetime.datetime.now()
         }
-        # This saves it to the 'exercises' collection
         self.db['exercises'].update_one(
             {"name": name},
             {"$set": template},
@@ -80,12 +79,10 @@ class FlexDatabase:
         return f"Template for {name} saved at {observed_angle} degrees"
     def get_user_sessions(self, user_id):
         try:
-            # Sort by timestamp descending so newest is first
             sessions = list(self.sessions.find({"user_id": user_id}).sort("timestamp", -1))
             if not sessions:
                 return "No workout data found for this user."
             
-            # Format the data into a readable string or list for the UI
             report = ""
             for s in sessions:
                 date = s['timestamp'].strftime("%Y-%m-%d %H:%M")
@@ -98,21 +95,16 @@ class FlexDatabase:
         Returns a list of User IDs that the logged-in user (my_id) 
         has already granted access to.
         """
-        # 1. Fetch the logged-in user's document
         user_doc = self.users.find_one({"user_id": my_id}, {"shared_with": 1})
         
         if not user_doc or "shared_with" not in user_doc:
             return []
 
-        # 2. Get the list of IDs you've shared with
         shared_ids = user_doc["shared_with"]
 
-        # 3. Optional: Verify these users still exist and return their IDs
-        # This finds all users whose user_id is IN your shared_ids list
         valid_shares = self.users.find({"user_id": {"$in": shared_ids}}, {"user_id": 1})
         
         return [u["user_id"] for u in valid_shares]
-    # Add this to your FlexDatabase class in data_manager.py
     def remove_shared_access(self, my_id, pro_id_to_remove):
         """Removes a specific user from the shared_with list."""
         self.users.update_one(
@@ -120,7 +112,6 @@ class FlexDatabase:
             {"$pull": {"shared_with": pro_id_to_remove}}
         )
         return f"Access revoked for {pro_id_to_remove}."
-    # In FlexDatabase class
     def sync_sharing(self, my_id, selected_list):
         """Overwrites the shared_with list to match the UI checkboxes."""
         self.users.update_one(

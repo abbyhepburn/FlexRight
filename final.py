@@ -10,7 +10,7 @@ load_dotenv()
 db_helper = FlexDatabase(os.getenv("MONGO_URI"))
 SUMMARY_PATH = os.path.join(os.path.dirname(__file__), "session_result.json")
 custom_css = """
-body, .gradio-container, .main-card, .inner-card {
+body, .gradio-container, .main-card, .inner-card, .gr-dropdown, .gr-dropdown-content, .gr-dropdown-content button {
     background-color: #E8E6EB !important;
     font-family: 'Inter', system-ui, sans-serif;
 }
@@ -71,7 +71,31 @@ button.primary:hover, button.secondary:hover {
     color: #9B8EC0 !important; /* Muted Light Purple */
     font-weight: 600 !important;
 }
+.token, .gr-selection-item {
+    background-color: #FFFFFF !important;  /* White background like your inputs */
+    border: 1px solid #9B8EC0 !important;   /* Light purple border */
+    color: #4A4A4A !important;             /* Dark grey text */
+    border-radius: 8px !important;
+    padding: 2px 8px !important;
+    margin: 2px !important;
+    box-shadow: none !important;
+}
 
+.token-remove, .gr-selection-item button {
+    color: #9B8EC0 !important;             /* Match the border color */
+    background: transparent !important;
+    border: none !important;
+}
+
+.token-remove:hover {
+    color: #7B6BA8 !important;             /* Darkens slightly on hover */
+    background: #E8E6EB !important;        /* Subtle lavender highlight */
+}
+
+.gr-input-label, .gr-form label span, .info {
+    color: #9B8EC0 !important;             /* Muted light purple text */
+    font-weight: 600 !important;
+}
 #login_btn, #signup_btn, button.primary {
     background-color: #9B8EC0 !important; /* Muted Light Purple background */
     color: #FFFFFF !important;            /* Keep text white for readability */
@@ -319,11 +343,13 @@ with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
                         share_input = gr.Textbox(label="Grant Access to User", placeholder="Enter username...")
                         add_btn = gr.Button("Grant Access", variant="primary")
                         access_tags = gr.Dropdown(
-                            label="Users who can see your data",
+                            label="",              
+                            show_label=False,      
                             choices=[], 
                             multiselect=True, 
                             interactive=True,
-                            info="Remove a tag to revoke access instantly."
+                            info="Remove a tag to revoke access instantly.",
+                            container=False        
                         )
                         status_msg = gr.Markdown()
 
