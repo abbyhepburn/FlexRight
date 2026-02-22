@@ -1,192 +1,283 @@
 # -*- coding: utf-8 -*-
 import gradio as gr
-import pymongo
-import certifi
 import os
-import numpy as np
-import cv2
-from ultralytics import YOLO
+import subprocess
+import json
+from data_manager import FlexDatabase
+from dotenv import load_dotenv
 
-# --- 1. INITIALIZATION ---
-model = YOLO('yolov8n-pose.pt')
-counter = 0
-stage = "UP"
+# Load database helper
+load_dotenv()
+db_helper = FlexDatabase(os.getenv("MONGO_URI"))
 
-# --- 2. MONGODB CONNECTION ---
-MONGO_URI = "mongodb+srv://abbyhepburn526:AbbyMay26!@flexcluster.sdbddiz.mongodb.net/?appName=FlexCluster"
-
-try:
-    client = pymongo.MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
-    db = client["FlexCluster"]
-    users_col = db["users"]
-    exercises_col = db["exercises"]
-    sessions_col = db["sessions"]
-    print("[OK] Connection Successful: FlexCluster is Live!")
-except Exception as e:
-    print(f"[ERROR] Connection Error: {e}")
-    users_col = exercises_col = sessions_col = None
-
-# --- 3. CUSTOM UI STYLING ---
+# --- UI STYLING: FULL SCREEN, CENTERED, LAVENDER THEME ---
 custom_css = """
-.gradio-container {background-color: #FFFFFF !important}
-footer {display: none !important} 
-.lavender-text { color: #B299FF !important; font-weight: bold; }
+.gradio-container {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+body, .gradio-container {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: #E8E6EB !important;
+}
+footer { display: none !important; }
+
+.main-card {
+    background: #E6E0F0 !important; 
+    border-radius: 20px !important;
+    padding: 40px !important;
+    width: 95% !important;
+    max-width: 1600px !important;
+    margin: 20px auto;
+    box-shadow: 0 10px 30px rgba(123, 107, 168, 0.15);
+}
+
+.inner-card {
+    background: #EDE8F2 !important;  
+    border: 1px solid #E8E6EB !important;
+    border-radius: 20px !important;
+    padding: 30px !important;
+    margin-top: 15px;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+}
+
+h1, h2, h3, .gr-markdown, label, span, p {
+    font-weight: 700 !important;
+    text-align: center !important;
+    color: #9A96A3 !important; 
+}
+
+.accent { color: #7B6BA8 !important; font-size: 36px !important; letter-spacing: 0.1em !important; }
+
+input, textarea, .gr-input {
+    background: white !important;
+    color: #000 !important; 
+    border: 1px solid #E8E6EB !important;
+    border-radius: 12px !important;
+    padding: 12px !important;
+    text-align: center !important;
+    max-width: 500px !important;
+    margin: 0 auto !important;
+}
+
+button.primary {
+    background-color: #7B6BA8 !important;
+    color: #F5F3F8 !important; 
+    border: none !important;
+    border-radius: 12px !important;
+    font-weight: 600 !important;
+    font-size: 18px !important;
+    padding: 15px 30px !important;
+    width: 300px !important;
+    margin: 20px auto !important;
+    cursor: pointer;
+}
+
+.activity-log-content table {
+    width: 100% !important;
+    margin: 20px auto !important;
+    border-collapse: collapse !important;
+    background: white !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+.activity-log-content th, .activity-log-content td {
+    border: 1px solid #E8E6EB !important;
+    padding: 14px !important;
+    text-align: center !important;
+    color: #000 !important;
+}
+
+.activity-log-content th {
+    background: #7B6BA8 !important;
+    color: white !important;
+}
 """
 
-flex_theme = gr.themes.Soft(primary_hue="purple", neutral_hue="slate").set(
-    body_background_fill="white",
-    block_background_fill="white",
-    button_primary_background_fill="#B299FF",
-    button_primary_text_color="white",
+flex_theme = gr.themes.Soft(primary_hue="violet", neutral_hue="slate").set(
+    body_background_fill="#E8E6EB",
+    block_background_fill="#EDE8F2",
+    button_primary_background_fill="#7B6BA8",
+    button_primary_text_color="#F5F3F8",
 )
 
-# --- 4. BACKEND LOGIC ---
+# --- BACKEND FUNCTIONS ---
 
-def calculate_angle(a, b, c):
-    """Math logic for Member 1"""
-    a, b, c = np.array(a), np.array(b), np.array(c)
-    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
-    angle = np.abs(radians * 180.0 / np.pi)
-    return 360 - angle if angle > 180.0 else angle
+def get_available_users():
+    try:
+        all_users = db_helper.users.find({}, {"user_id": 1})
+        return [u["user_id"] for u in all_users]
+    except:
+        return []
 
-def predict_pose(img):
-    global counter, stage 
+def search_user_metrics(my_id, target_id):
+    if not target_id: return "Please enter a User ID."
+    target_id = target_id.lower().strip()
+    permission_check = db_helper.users.find_one({"user_id": target_id, "shared_with": my_id})
+    if not permission_check: return f"Access Denied: '{target_id}' has not shared their data."
     
-    if img is None:
-        return None
+    sessions = list(db_helper.sessions.find({"user_id": target_id}).sort("timestamp", -1))
+    if not sessions: return "No workout data found."
     
-    # Convert Gradio (RGB) to OpenCV (BGR)
-    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    results = model(img_bgr, verbose=False)
+    md += "| Date | Exercise | Reps | Over | Under |\n|:---:|:---:|:---:|:---:|:---:|\n"
+    for s in sessions:
+        date_str = s['timestamp'].strftime("%Y-%m-%d %I:%M %p")
+        md += f"| {date_str} | {s['exercise']} | {s['reps']} | {s.get('over_count', 0)} | {s.get('under_count', 0)} |\n"
+    return md
+
+def get_live_metrics(uid):
+    if not uid: return "### Please log in to view your metrics."
+    sessions = list(db_helper.sessions.find({"user_id": uid}).sort("timestamp", -1).limit(15))
+    if not sessions: return "### No workout data found yet."
     
-    # Logic for counting
-    for r in results:
-        if r.keypoints is not None and len(r.keypoints.xy) > 0:
-            points = r.keypoints.xy[0].cpu().numpy()
-            
-            # Check for Left Arm: Shoulder(5), Elbow(7), Wrist(9)
-            if len(points) > 9:
-                p5, p7, p9 = points[5], points[7], points[9]
-                
-                # Only calculate if points are visible (not [0,0])
-                if p7[0] > 0 and p9[0] > 0:
-                    angle = calculate_angle(p5, p7, p9)
-
-                    # Curl State Machine
-                    if angle > 160:
-                        stage = "DOWN"
-                    if angle < 30 and stage == "DOWN":
-                        stage = "UP"
-                        counter += 1
-
-    # Get the skeleton drawing
-    annotated_frame = results[0].plot()
+    latest = sessions[0]
+    history_md = f"## Latest Session: {latest['reps']} Reps of {latest['exercise']}\n"
+    history_md += f"### Over: {latest.get('over_count', 0)} | Under: {latest.get('under_count', 0)}\n---\n"
+    history_md += "### Full Activity Log\n"
+    history_md += "| Date | Exercise | Reps | Overext. | Underext. |\n|:---:|:---:|:---:|:---:|:---:|\n"
     
-    # Draw the count on the frame
-    # (Using BGR colors: (75, 0, 130) is a deep purple)
-    cv2.putText(annotated_frame, f"Reps: {counter}", (50, 80), 
-                cv2.FONT_HERSHEY_DUPLEX, 1.5, (75, 0, 130), 3)
-    cv2.putText(annotated_frame, f"Stage: {stage}", (50, 130), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
-                
-    # Convert back to RGB for Gradio
-    return cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-
-def handle_initial_register(uname, fname):
-    if not uname or not fname:
-        return gr.Column(visible=True), gr.Column(visible=False), "[WARNING] Please enter a Username and Full Name."
-    return gr.Column(visible=False), gr.Column(visible=True), f"Almost there, {fname}! Create a secure password."
-
-def handle_final_submit(uname, fname, pwd):
-    if not pwd or len(pwd) < 6:
-        return gr.Tabs(selected="signup_tab"), "[ERROR] Password too short (min 6 characters)."
-    if users_col is None:
-        return gr.Tabs(selected="signup_tab"), "[WARNING] Database offline."
+    for s in sessions:
+        date_str = s['timestamp'].strftime("%b %d, %I:%M %p")
+        history_md += f"| {date_str} | {s['exercise']} | {s['reps']} | {s.get('over_count', 0)} | {s.get('under_count', 0)} |\n"
     
-    if users_col.find_one({"username": uname}):
-        return gr.Tabs(selected="signup_tab"), "[ERROR] Username already taken!"
+    return history_md
 
-    new_user = {
-        "username": uname, "full_name": fname, "password": pwd,
-        "role": "patient", "created_at": "2026-02-21"
-    }
-    users_col.insert_one(new_user)
-    return gr.Tabs(selected="login_tab"), f"[OK] Welcome, {uname}! Now login."
+def refresh_sharing_view(uid):
+    all_users = get_available_users()
+    already_shared = db_helper.check_shared(uid)
+    return gr.update(choices=all_users, value=already_shared)
 
 def handle_login(username, password):
-    DEMO_CREDENTIALS = {"demo": "demo123", "test": "test123"}
-    if username in DEMO_CREDENTIALS and DEMO_CREDENTIALS[username] == password:
-        return gr.Column(visible=True), f"[OK] Demo Login Successful! Welcome, {username}!"
-    
-    if users_col is not None:
-        user = users_col.find_one({"username": username, "password": password})
-        if user:
-            return gr.Column(visible=True), f"[OK] Logged in: **{user['full_name']}**"
-    
-    return gr.Column(visible=False), "[ERROR] Invalid Credentials."
+    if not username or not password:
+        return gr.update(visible=False), gr.update(visible=True), "Enter both fields", "", gr.update()
+    success, profile = db_helper.login_user(username, password)
+    if success:
+        return gr.update(visible=True), gr.update(visible=False), f"## Welcome, {username}!", username, gr.update(choices=get_available_users(), value=db_helper.check_shared(username))
+    return gr.update(visible=False), gr.update(visible=True), f"{profile}", "", gr.update()
+def handle_logout():
+    # This explicitly resets all data-sensitive components to defaults
+    return [
+        gr.update(visible=False), # protected_view
+        gr.update(visible=True),  # auth_container
+        "",                       # current_user_id (state)
+        "",                       # user_welcome
+        "History cleared.",       # history_display
+        "Enter a username above to begin.", # metrics_display
+        gr.update(value=[], choices=[]),    # access_tags
+        ""                        # status_msg
+    ]
+def launch_workout(uid):
+    if not uid: return "Please login first."
+    try:
+        python_exe = os.path.join(os.path.dirname(__file__), "venv", "bin", "python.exe")
+        subprocess.Popen([python_exe, os.path.join(os.path.dirname(__file__), "yolo_test.py"), uid])
+        return f"Workout launched for {uid}!"
+    except Exception as e:
+        return f"Launch failed: {str(e)}"
 
-# --- 5. THE INTERFACE ---
-with gr.Blocks(title="FlexRight", theme=flex_theme, css=custom_css) as demo:
-    
-    gr.Markdown("# 🛡️ <span class='lavender-text'>FlexRight</span>")
-    gr.Markdown("### AI-Powered Recovery & Skeletal Tracking")
-    
-    with gr.Tabs() as main_tabs:
-        
-        # --- SIGN UP TAB ---
-        with gr.Tab("Sign Up", id="signup_tab"):
-            with gr.Column(visible=True) as register_step:
-                gr.Markdown("### 👤 Step 1: Create Your Profile")
-                new_user_id = gr.Textbox(label="Username")
-                full_name = gr.Textbox(label="Full Name")
-                register_btn = gr.Button("Register", variant="primary")
-            
-            with gr.Column(visible=False) as password_step:
-                gr.Markdown("### 🔐 Step 2: Set Your Security")
-                new_pwd = gr.Textbox(label="Create Password", type="password")
-                submit_btn = gr.Button("Complete Account Setup ✅", variant="primary")
+# --- INTERFACE ---
 
-            signup_status = gr.Markdown()
+with gr.Blocks(theme=flex_theme, css=custom_css, title="FlexRight") as demo:
+    current_user_id = gr.State("")
 
-        # --- LOGIN TAB ---
-        with gr.Tab("Login", id="login_tab"):
-            gr.Markdown("### 🔐 Secure Sign-In")
-            user_input = gr.Textbox(label="Username")
-            pass_input = gr.Textbox(label="Password", type="password")
-            login_btn = gr.Button("Login", variant="primary")
-            login_msg = gr.Markdown("Please sign in to access the Gym.")
+    # AUTH CONTAINER
+    with gr.Column(visible=True) as auth_container:
+        with gr.Column(elem_classes="main-card"):
+            gr.Markdown("# <span class='accent'>FlexRight</span>")
+            with gr.Tabs() as auth_tabs:
+                with gr.Tab("Login", id="login_tab"):
+                    with gr.Column(elem_classes="inner-card"):
+                        user_input = gr.Textbox(label="Username")
+                        pass_input = gr.Textbox(label="Password", type="password")
+                        login_btn = gr.Button("Login", variant="primary")
+                        login_msg = gr.Markdown()
+                with gr.Tab("Sign Up", id="signup_tab"):
+                    with gr.Column(elem_classes="inner-card"):
+                        reg_user = gr.Textbox(label="Username")
+                        reg_name = gr.Textbox(label="Full Name")
+                        reg_email = gr.Textbox(label="Email")
+                        reg_pass = gr.Textbox(label="Password", type="password")
+                        reg_btn = gr.Button("Create Account", variant="primary")
+                        reg_status = gr.Markdown()
 
-    # --- PROTECTED WORKSPACE ---
+    # PROTECTED VIEW
     with gr.Column(visible=False) as protected_view:
-        with gr.Tabs():
-            with gr.Tab("The Gym"):
-                gr.Markdown("## Live AI Skeletal Tracking")
-                webcam = gr.Image(sources=["webcam"], streaming=True, label="AI Feed")
-                # Wiring the stream
-                webcam.stream(fn=predict_pose, inputs=webcam, outputs=webcam, time_interval=0.1)
-                workout_status = gr.Markdown("Position yourself in the camera to see the tracking.")
+        with gr.Column(elem_classes="main-card"):
+            gr.Markdown("# <span class='accent'>FlexRight</span>")
+            user_welcome = gr.Markdown("### Welcome")
+            logout_btn = gr.Button("Logout", variant="secondary")
 
-            with gr.Tab("Professional Portal"):
-                gr.Markdown("## [HOSPITAL] Clinical Telemetry")
-                client_id = gr.Dropdown(label="Authorized Client", choices=["Alex", "Jordan", "New User"])
-                gr.Markdown("*(Database Reports loading...)*")
+            with gr.Tabs():
+                with gr.Tab("Gym Session"):
+                    with gr.Column(elem_classes="inner-card"):
+                        launch_btn = gr.Button("Start Workout", variant="primary")
+                        workout_status = gr.Markdown("Tracking window will open separately.")
+                        refresh_btn = gr.Button("Refresh Log")
+                
+                with gr.Tab("Progress"):
+                    with gr.Column(elem_classes="inner-card"):
+                        history_display = gr.Markdown(elem_classes=["activity-log-content"])
 
-    # --- THE WIRING ---
-    register_btn.click(
-        fn=handle_initial_register,
-        inputs=[new_user_id, full_name],
-        outputs=[register_step, password_step, signup_status]
-    )
-    submit_btn.click(
-        fn=handle_final_submit,
-        inputs=[new_user_id, full_name, new_pwd],
-        outputs=[main_tabs, signup_status]
-    )
+                with gr.Tab("Privacy & Sharing"):
+                    with gr.Column(elem_classes="inner-card"):
+                        share_input = gr.Textbox(label="Grant Access to User", placeholder="Enter username...")
+                        add_btn = gr.Button("Grant Access", variant="primary")
+                        access_tags = gr.Dropdown(
+                            label="Users who can see your data",
+                            choices=[], 
+                            multiselect=True, 
+                            interactive=True,
+                            info="Remove a tag to revoke access instantly."
+                        )
+                        status_msg = gr.Markdown()
+
+                with gr.Tab("Shared Stats"):
+                    with gr.Column(elem_classes="inner-card"):
+                        search_input = gr.Textbox(label="Enter Friend's Username")
+                        search_btn = gr.Button("View Progress", variant="primary")
+                        metrics_display = gr.Markdown()
+
+    # --- EVENTS ---
     login_btn.click(
-        fn=handle_login,
-        inputs=[user_input, pass_input],
-        outputs=[protected_view, login_msg]
+        fn=handle_login, 
+        inputs=[user_input, pass_input], 
+        outputs=[protected_view, auth_container, user_welcome, current_user_id, access_tags]
+    ).then(
+        fn=get_live_metrics, 
+        inputs=[current_user_id], 
+        outputs=[history_display]
     )
 
+    refresh_btn.click(fn=get_live_metrics, inputs=[current_user_id], outputs=[history_display])
+    launch_btn.click(fn=launch_workout, inputs=[current_user_id], outputs=workout_status)
+    search_btn.click(search_user_metrics, [current_user_id, search_input], metrics_display)
+    
+    # Restored Access Management Logic
+    add_btn.click(
+        fn=db_helper.add_shared_access,
+        inputs=[current_user_id, share_input],
+        outputs=status_msg
+    ).then(
+        fn=refresh_sharing_view,
+        inputs=[current_user_id],
+        outputs=[access_tags]
+    )
+
+    access_tags.change(
+        fn=db_helper.sync_sharing,
+        inputs=[current_user_id, access_tags],
+        outputs=status_msg
+    )
+
+    logout_btn.click(
+        fn=handle_logout, 
+        outputs=[protected_view, auth_container, current_user_id, user_welcome, history_display, metrics_display, access_tags, status_msg]
+    )
 if __name__ == "__main__":
-    demo.launch(share=True)
+    demo.launch(inbrowser=True)
