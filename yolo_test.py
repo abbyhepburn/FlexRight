@@ -425,7 +425,7 @@ while cap.isOpened():
 cap.release()
 cv2.destroyAllWindows()
 
-# --- STEP 7: Save session summary to a temp JSON file for the website ---
+# --- STEP 7: Savee session summary to a temp JSON file for the website ---
 over_count  = sum(1 for w in warnings_log if w["type"] == "overextension")
 under_count = sum(1 for w in warnings_log if w["type"] == "underextension")
 
